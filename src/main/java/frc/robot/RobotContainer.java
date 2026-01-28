@@ -6,6 +6,7 @@ package frc.robot;
 
 import static edu.wpi.first.units.Units.*;
 
+import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
@@ -31,6 +32,8 @@ public class RobotContainer {
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
 
+    
+
     private final Telemetry logger = new Telemetry(MaxSpeed);
 
     private final CommandXboxController DriverStick = new CommandXboxController(0);
@@ -40,7 +43,7 @@ public class RobotContainer {
     public RobotContainer() {
         configureBindings();
     }
-
+    
     private void configureBindings() {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
@@ -90,6 +93,12 @@ public class RobotContainer {
         DriverStick.povRight().whileTrue(
             drivetrain.applyRequest(() -> drive.withVelocityX(0).withVelocityY(NudgeSpeed).withRotationalRate(0))
         );
+        
+    }
+    public double getCurrentRotation() {
+        Rotation2d currentRotation = drivetrain.getState().Pose.getRotation();
+        double robotDegrees = currentRotation.getDegrees();
+        return robotDegrees;
     }
 
     public Command getAutonomousCommand() {
@@ -109,5 +118,16 @@ public class RobotContainer {
             // Finally idle for the rest of auton
             drivetrain.applyRequest(() -> idle)
         );
+    }
+    public Command do180turn() {
+        return drivetrain.applyRequest(() -> 
+            facingAngleRequest
+            .withVelocityX(0)
+            .withVelocityY(0)
+            // We take the current rotation and add 180 degrees
+            .withTargetDirection(drivetrain.getState().Pose.getRotation().plus(Rotation2d.k180deg))
+    )
+    // This tells the command to stop once the robot is within 2 degrees of the target
+        .until(() -> Math.abs(drivetrain.getState().Pose.getRotation().getDegrees() % 360) > 178); 
     }
 }
