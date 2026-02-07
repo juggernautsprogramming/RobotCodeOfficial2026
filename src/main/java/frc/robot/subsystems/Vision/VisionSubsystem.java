@@ -7,10 +7,13 @@ package frc.robot.subsystems.Vision;
 import java.util.Map;
 
 import org.photonvision.PhotonCamera;
+import org.photonvision.PhotonUtils;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -34,7 +37,19 @@ public class VisionSubsystem extends SubsystemBase
         strafeFeedforward = new SimpleMotorFeedforward(VisionConstants.kS, VisionConstants.kV, VisionConstants.kA);
         
     }
-    
+    public Pose3d FindRobotPosition() {
+        if (bestTarget != null) {
+            var tagPoseOptional = frc.robot.Constants.VisionConstants.kTagLayout.getTagPose(bestTarget.getFiducialId());
+            if (tagPoseOptional.isPresent()) {
+                return PhotonUtils.estimateFieldToRobotAprilTag(
+                    bestTarget.getBestCameraToTarget(), 
+                    tagPoseOptional.get(),              
+                    frc.robot.Constants.VisionHardware.kRobotToCam 
+                );
+            }
+        }
+        return null; 
+    }
     public boolean hasValidTarget() {
         return bestTarget != null;
     }
@@ -80,9 +95,20 @@ public class VisionSubsystem extends SubsystemBase
     }
     return 0.0;
 }
+    public double getDistanceToTarget() {
+        if (hasValidTarget()) {
+            return PhotonUtils.calculateDistanceToTargetMeters(
+                VisionConstants.CAMERA_HEIGHT_METERS,
+                VisionConstants.TARGET_HEIGHT_METERS,
+                VisionConstants.CAMERA_PITCH_RADIANS,
+                Units.degreesToRadians(bestTarget.getPitch())
+            );
+        }   
+        return 0.0;
+    }
 
     @Override
-public void periodic() {
+    public void periodic() {
     var result = camera.getLatestResult();
 
     if (result.hasTargets()) {

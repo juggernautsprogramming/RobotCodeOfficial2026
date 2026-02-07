@@ -25,6 +25,10 @@ public class Robot extends TimedRobot {
     private edu.wpi.first.networktables.GenericEntry m_yawWidget;
     private edu.wpi.first.networktables.GenericEntry m_pitchWidget;
     private edu.wpi.first.networktables.GenericEntry m_areaWidget;
+    private edu.wpi.first.networktables.GenericEntry m_robotXWidget;
+    private edu.wpi.first.networktables.GenericEntry m_robotYWidget;
+    private edu.wpi.first.networktables.GenericEntry m_distanceWidget;
+    private final edu.wpi.first.wpilibj.smartdashboard.Field2d m_field = new edu.wpi.first.wpilibj.smartdashboard.Field2d();
     /* log and replay timestamp and joystick data */
     private final HootAutoReplay m_timeAndJoystickReplay = new HootAutoReplay()
         .withTimestampReplay()
@@ -46,32 +50,57 @@ public class Robot extends TimedRobot {
             .withProperties(Map.of("showControls", false))
             .withPosition(2, 0)
             .withSize(3, 3);
+        m_robotXWidget = tab.add("Robot X", 0.0)
+                        .withPosition(0, 2)
+                        .withSize(1, 1)
+                        .getEntry();
+
+        m_robotYWidget = tab.add("Robot Y", 0.0)
+                        .withPosition(1, 2)
+                        .withSize(1, 1)
+                        .getEntry();
+        m_distanceWidget = Shuffleboard.getTab("Example Tab")
+                        .add("Distance (M)", 0.0)
+                        .withPosition(0, 3) // Placing it below the ID widget
+                        .getEntry();
+                        Shuffleboard.getTab("Example Tab").add("Field Map", m_field).withPosition(5, 0).withSize(4, 3);
     }
     
-    @Override
-    public void robotPeriodic() {
-        m_timeAndJoystickReplay.update();
-        CommandScheduler.getInstance().run(); 
+@Override
+public void robotPeriodic() {
+    m_timeAndJoystickReplay.update();
+    CommandScheduler.getInstance().run(); 
 
-        // 3. Update all widgets every loop
-        var vision = m_robotContainer.visionSubsystem;
+    var vision = m_robotContainer.visionSubsystem;
 
-        if (vision.hasValidTarget()) {
-            // This pulls the actual target object to get detailed info
-            var target = vision.getBestTarget(); 
-            
-            m_tagIdWidget.setInteger(target.getFiducialId());
-            m_yawWidget.setDouble(target.getYaw());
-            m_pitchWidget.setDouble(target.getPitch());
-            m_areaWidget.setDouble(target.getArea());
-        } else {
-            // Clear values when no target is seen
-            m_tagIdWidget.setInteger(-1);
-            m_yawWidget.setDouble(0);
-            m_pitchWidget.setDouble(0);
-            m_areaWidget.setDouble(0);
+    if (vision.hasValidTarget()) {
+        var target = vision.getBestTarget();
+        double distance = vision.getDistanceToTarget();
+
+        // 1. Update the Basic Data
+        m_tagIdWidget.setInteger(target.getFiducialId());
+        m_yawWidget.setDouble(target.getYaw());
+        m_pitchWidget.setDouble(target.getPitch());
+        m_areaWidget.setDouble(target.getArea());
+        m_distanceWidget.setDouble(distance);
+
+        // 2. Handle Localization (The Field Position)
+        // We explicitly tell Java this is a Pose3d to fix the "type Object" errors
+        edu.wpi.first.math.geometry.Pose3d robotPose = vision.FindRobotPosition();
+
+        if (robotPose != null) {
+            m_field.setRobotPose(robotPose.toPose2d()); // This fixes toPose2d() error
+            m_robotXWidget.setDouble(robotPose.getX());  // This fixes getX() error
+            m_robotYWidget.setDouble(robotPose.getY());  // This fixes getY() error
         }
+    } else {
+        m_tagIdWidget.setInteger(-1);
+        m_yawWidget.setDouble(0.0);
+        m_pitchWidget.setDouble(0.0);
+        m_areaWidget.setDouble(0.0);
+        m_distanceWidget.setDouble(0.0);
     }
+}
 
     @Override
     public void disabledInit() {}

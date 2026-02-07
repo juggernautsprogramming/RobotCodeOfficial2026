@@ -4,17 +4,23 @@ import static frc.robot.Constants.VisionConstants.*;
 import static frc.robot.Constants.VisionHardware.*;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants;
+
 import java.util.Optional;
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
+import org.photonvision.PhotonUtils;
 import org.photonvision.PhotonPoseEstimator.PoseStrategy;
+import org.photonvision.targeting.PhotonTrackedTarget; // Added import
 
 public class ReadAprilTag extends SubsystemBase {
     private final PhotonCamera camera;
     private final PhotonPoseEstimator photonPoseEstimator;
+    private PhotonTrackedTarget bestTarget; // Added so FindRobotPosition can see it
 
     public ReadAprilTag() {
         // Initialize the camera using the name from Constants
@@ -32,23 +38,36 @@ public class ReadAprilTag extends SubsystemBase {
     }
 
     /**
-     * The main function to call from your Drivetrain or Commands.
-     * It looks at the camera and tries to figure out where the robot is on the field.
+     * Calculates the Robot's position on the field using a single tag and PhotonUtils.
      */
-    public Optional<EstimatedRobotPose> getEstimatedGlobalPose(Pose2d prevEstimatedRobotPose) {
-        // 1. Get the latest result from the camera hardware
-        var latestResult = camera.getLatestResult();
-    
-        // 2. Set the reference pose (where the robot thinks it is)
-        photonPoseEstimator.setReferencePose(prevEstimatedRobotPose);
-        
-        // 3. Pass that 'latestResult' into the update method
-        return photonPoseEstimator.update(latestResult); 
+    public Pose3d FindRobotPosition() {
+        // 1. Check if we actually have a target saved in our periodic loop
+        if (bestTarget != null) {
+            var tagPoseOptional = kTagLayout.getTagPose(bestTarget.getFiducialId());
+
+            // 2. Check if the ID we see actually exists on the official field map
+            if (tagPoseOptional.isPresent()) {
+                // 3. Calculate the Robot's position on the field
+                return PhotonUtils.estimateFieldToRobotAprilTag(
+                    bestTarget.getBestCameraToTarget(), 
+                    tagPoseOptional.get(),              
+                    kRobotToCam 
+                );
+            }
+        }
+        return null; 
     }
 
     /**
-     * Helper method to check if the camera sees any targets at all.
+     * The main function for high-accuracy localization.
+     * Combines multiple tags to find the robot's pose.
      */
+    public Optional<EstimatedRobotPose> getEstimatedGlobalPose(Pose2d prevEstimatedRobotPose) {
+        var latestResult = camera.getLatestResult();
+        photonPoseEstimator.setReferencePose(prevEstimatedRobotPose);
+        return photonPoseEstimator.update(latestResult); 
+    }
+
     public boolean hasTargets() {
         return camera.getLatestResult().hasTargets();
     }
@@ -56,14 +75,16 @@ public class ReadAprilTag extends SubsystemBase {
     @Override
     public void periodic() {
         var result = camera.getLatestResult();
-    
-        // This tells you if the camera is actually seeing a valid tag
-        SmartDashboard.putBoolean("Vision/Has Target", result.hasTargets());
-    
+        
         if (result.hasTargets()) {
-            SmartDashboard.putNumber("Vision/Best Tag ID", result.getBestTarget().getFiducialId());
-            // Ambiguity: 0.0 is perfect, 1.0 is "I have no idea which way this tag is facing"
-            SmartDashboard.putNumber("Vision/Ambiguity", result.getBestTarget().getPoseAmbiguity());
+            bestTarget = result.getBestTarget(); // Update class variable
+            
+            SmartDashboard.putBoolean("Vision/Has Target", true);
+            SmartDashboard.putNumber("Vision/Best Tag ID", bestTarget.getFiducialId());
+            SmartDashboard.putNumber("Vision/Ambiguity", bestTarget.getPoseAmbiguity());
+        } else {
+            bestTarget = null;
+            SmartDashboard.putBoolean("Vision/Has Target", false);
         }
     }
 }

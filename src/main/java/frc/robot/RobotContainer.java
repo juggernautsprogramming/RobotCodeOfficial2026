@@ -45,6 +45,7 @@ public class RobotContainer {
     private final CommandXboxController PlayerStick = new CommandXboxController(1);
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
     final VisionSubsystem visionSubsystem = new VisionSubsystem("Camera_BackLeft");
+	public Object m_readAprilTag;
     public RobotContainer() {
         configureBindings();
     }

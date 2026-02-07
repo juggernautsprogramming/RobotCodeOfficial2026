@@ -57,6 +57,10 @@ public final class Constants {
         public static final double angleTolerance = 1.0; // Degrees
         public static final double kAmbiguityThreshold = 0.2; // Ignore targets that are "blurry" or confusing
 
+        public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(15);
+        public static final double TARGET_HEIGHT_METERS = Units.inchesToMeters(12.9);
+        public static final double CAMERA_PITCH_RADIANS = Units.degreesToRadians(-15);
+
         public static final double kP = 0.1; // Adjust for better tuning
         public static final double kI = 0.00;
         public static final double kD = 0.005;
