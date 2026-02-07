@@ -1,17 +1,14 @@
-# TODO: Add Nudge Control with D-pad on Xbox Controller
+# TODO List for Updating VisionSubsystem.java and ObjectCamera.java for WPILib 2026 and PhotonVision 2026
 
-## Steps to Complete:
-- [x] Define a nudge speed constant (e.g., 30% of MaxSpeed) in RobotContainer.java
-- [x] Add D-pad bindings in configureBindings() method:
-  - [x] Bind povUp() to forward nudge (positive X velocity)
-  - [x] Bind povDown() to backward nudge (negative X velocity)
-  - [x] Bind povLeft() to left nudge (negative Y velocity)
-  - [x] Bind povRight() to right nudge (positive Y velocity)
-- [ ] Test the implementation (followup step)
-
-## Dependent Files:
-- src/main/java/frc/robot/RobotContainer.java
-
-## Followup Steps:
-- Verify the changes compile and run without errors
-- Test on the robot to ensure nudge control works as expected
+- [x] Edit Constants.java: Add Resolution class
+- [x] Edit Constants.java: Add VisionHardware class with camera constants
+- [x] Edit Constants.java: Add Field class with updated AprilTagFieldLayout for k2025Reefscape
+- [x] Edit VisionSubsystem.java: Add missing imports (Distance, Angle, Logger)
+- [x] Edit VisionSubsystem.java: Update AprilTagFields to k2025Reefscape
+- [x] Edit VisionSubsystem.java: Fix getObjectLocation to use actual distance
+- [x] Edit VisionSubsystem.java: Initialize m_cameraNotifier
+- [x] Edit VisionSubsystem.java: Add sim update in simulationPeriodic
+- [x] Edit VisionSubsystem.java: Remove/comment AprilTagCamera references
+- [x] Edit ObjectCamera.java: Add missing imports (Distance, Angle)
+- [x] Test compilation
+- [ ] Verify vision functionality in sim/real robot

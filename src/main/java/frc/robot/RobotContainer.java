@@ -20,11 +20,16 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
+import frc.robot.subsystems.Vision.VisionSubsystem;
+
+import frc.robot.commands.TurnToAngle;
+
 public class RobotContainer {
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
     private double NudgeSpeed = 0.2 * MaxSpeed; 
-
+    
+    
     /* Setting up bindings for necessary control of the swerve drive platform */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
             .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
@@ -39,7 +44,7 @@ public class RobotContainer {
     private final CommandXboxController DriverStick = new CommandXboxController(0);
     private final CommandXboxController PlayerStick = new CommandXboxController(1);
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
-
+    final VisionSubsystem visionSubsystem = new VisionSubsystem("Camera_BackLeft");
     public RobotContainer() {
         configureBindings();
     }
@@ -77,6 +82,9 @@ public class RobotContainer {
 
         // Reset the field-centric heading on left bumper press.
         DriverStick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
+
+        // Turn to 180 degrees when Y button is pressed
+        DriverStick.y().onTrue(new TurnToAngle(drivetrain, 180, false));
 
         drivetrain.registerTelemetry(logger::telemeterize);
 
@@ -119,15 +127,5 @@ public class RobotContainer {
             drivetrain.applyRequest(() -> idle)
         );
     }
-    public Command do180turn() {
-        return drivetrain.applyRequest(() -> 
-            facingAngleRequest
-            .withVelocityX(0)
-            .withVelocityY(0)
-            // We take the current rotation and add 180 degrees
-            .withTargetDirection(drivetrain.getState().Pose.getRotation().plus(Rotation2d.k180deg))
-    )
-    // This tells the command to stop once the robot is within 2 degrees of the target
-        .until(() -> Math.abs(drivetrain.getState().Pose.getRotation().getDegrees() % 360) > 178); 
-    }
+    
 }
