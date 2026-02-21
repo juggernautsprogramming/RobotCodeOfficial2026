@@ -10,12 +10,19 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
+//Constants
 import frc.robot.generated.TunerConstants;
+
+
+//Subsystems
+//Drive Train
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+//Vision
 import frc.robot.subsystems.Vision.VisionSubsystem;
 import frc.robot.commands.AlignToTag;
 import frc.robot.commands.TurnToAngle;
-
+//Climber
+import frc.robot.subsystems.Climber.ClimberSubsystem;
 public class RobotContainer {
     // Speed Constants
     private final double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
@@ -40,6 +47,7 @@ public class RobotContainer {
     // Subsystems
     public final CommandSwerveDrivetrain drivetrain;
     public final VisionSubsystem visionSubsystem;
+    public final ClimberSubsystem climberSubsystem;
 
     public RobotContainer() {
         // 1. Drivetrain MUST be initialized first
@@ -50,6 +58,8 @@ public class RobotContainer {
             new String[] {"Camera-BackLeft", "Camera-BackRight"},
             drivetrain 
         );
+        // 3. Initialize Climber
+        climberSubsystem = new ClimberSubsystem();
 
         configureBindings();
     }
@@ -93,6 +103,18 @@ public class RobotContainer {
 
         // Telemetry
         drivetrain.registerTelemetry(logger::telemeterize);
+
+        //Elevator bindings
+        // 1. Left Trigger (Operator): Manual Up (using power)
+        // Adjust the '0.5' to the speed you want
+        DriverStick.leftTrigger().whileTrue(
+            Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
+        ).onFalse(Commands.runOnce(climberSubsystem::stopMotors, climberSubsystem));
+
+        // 2. Left Bumper (Operator): Manual Down (using power)
+        DriverStick.leftBumper().whileTrue(
+            Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
+        ).onFalse(Commands.runOnce(climberSubsystem::stopMotors, climberSubsystem));
     }
 
     public double getCurrentRotation() {

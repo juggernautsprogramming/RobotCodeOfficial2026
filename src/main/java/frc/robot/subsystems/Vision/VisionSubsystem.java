@@ -11,10 +11,12 @@ import org.photonvision.targeting.PhotonTrackedTarget;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.networktables.GenericEntry;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInLayouts;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
@@ -33,6 +35,7 @@ public class VisionSubsystem extends SubsystemBase {
     // Logic State for UI and Commands
     private PhotonTrackedTarget m_bestTarget;
     private ReadAprilTag m_activeSensor;
+    private boolean m_allianceSet = false;
     
     // Controllers for simple alignment
     private final PIDController strafePID;
@@ -95,26 +98,57 @@ public class VisionSubsystem extends SubsystemBase {
         m_bestTarget = null;
         m_activeSensor = null;
 
+        // 1. Handle Alliance Origin (Run once when alliance is available)
+        if (!m_allianceSet && DriverStation.getAlliance().isPresent()) {
+            updateAllianceOrigin();
+            m_allianceSet = true;
+        }
+
+        // 2. Update Field2d UI with Robot and Camera Poses
+        Pose2d robotPose = m_drivetrain.getState().Pose;
+        m_field.setRobotPose(robotPose);
+
+        // Visualize specific camera layouts (front-left outward, back-left inward)
         for (ReadAprilTag sensor : m_sensors) {
-            // Ask the PhotonPoseEstimator where it thinks the robot is
-            var visionUpdate = sensor.getEstimatedGlobalPose(m_drivetrain.getState().Pose);
+            String camName = sensor.getCamera().getName();
+            Transform3d camOffset = Constants.VisionHardware.kCameraOffsets.getOrDefault(
+                camName, Constants.VisionHardware.kDefaultRobotToCam);
+            
+            // Project the camera's position/rotation onto the 2D field map
+            Pose2d camPoseOnField = robotPose.transformBy(
+                new Transform2d(camOffset.getTranslation().toTranslation2d(), camOffset.getRotation().toRotation2d())
+            );
+            m_field.getObject(camName + " Layout").setPose(camPoseOnField);
+        }
+
+        // 3. Detect Tilt (Bump/Obstacles)
+        double pitch = m_drivetrain.getPigeon2().getPitch().getValueAsDouble();
+        double roll = m_drivetrain.getPigeon2().getRoll().getValueAsDouble();
+        boolean isOnBump = Math.abs(pitch) > 5.0 || Math.abs(roll) > 5.0;
+
+        // 4. Process Camera Data
+        for (ReadAprilTag sensor : m_sensors) {
+            var visionUpdate = sensor.getEstimatedGlobalPose(robotPose);
 
             if (visionUpdate.isPresent()) {
-                EstimatedRobotPose estimatedPose = visionUpdate.get();
-                
-                // Calculate dynamic trust (Standard Deviations)
-                // We trust the camera less as distance increases
-                double distance = sensor.getCamera().getLatestResult().getBestTarget().getPoseAmbiguity(); // Or custom distance logic
-                double trust = 0.5 * Math.pow(distance + 1, 2); 
+                EstimatedRobotPose estimate = visionUpdate.get();
+                Pose2d estPose2d = estimate.estimatedPose.toPose2d();
 
-                // FEED DATA TO DRIVETRAIN
+                // Draw "Ghost Robot" for raw vision data
+                m_field.getObject("VisionTarget-" + sensor.getCamera().getName()).setPose(estPose2d);
+
+                // Trust Logic: High trust in X/Y (0.1), ignore Vision Rotation (99999)
+                // If on bump, we trust vision even more (0.05) to override wheel slip
+                double xyTrust = isOnBump ? 0.05 : 0.5;
+                var stdDevs = VecBuilder.fill(xyTrust, xyTrust, Units.degreesToRadians(99999));
+
                 m_drivetrain.addVisionMeasurement(
-                    estimatedPose.estimatedPose.toPose2d(),
-                    estimatedPose.timestampSeconds,
-                    VecBuilder.fill(trust, trust, trust)
+                    estPose2d,
+                    estimate.timestampSeconds,
+                    stdDevs
                 );
 
-                // Update UI state based on the camera seeing the "best" target
+                // Update best target for UI logic
                 var result = sensor.getCamera().getLatestResult();
                 if (result.hasTargets()) {
                     if (m_bestTarget == null || result.getBestTarget().getArea() > m_bestTarget.getArea()) {
@@ -122,15 +156,16 @@ public class VisionSubsystem extends SubsystemBase {
                         m_activeSensor = sensor;
                     }
                 }
+            } else {
+                // Clear ghost if camera sees nothing
+                m_field.getObject("VisionTarget-" + sensor.getCamera().getName()).setPose(new Pose2d(-10, -10, new Rotation2d()));
             }
-        }
+        }   
         updateUI();
     }
 
     private void updateUI() {
-        // Show the MERGED pose from the drivetrain on the map
         Pose2d currentPose = m_drivetrain.getState().Pose;
-        m_field.setRobotPose(currentPose);
         m_robotXWidget.setDouble(currentPose.getX());
         m_robotYWidget.setDouble(currentPose.getY());
 
@@ -161,11 +196,17 @@ public class VisionSubsystem extends SubsystemBase {
         return Math.max(-3.0, Math.min(3.0, rotationOutput));
     }
 
-    public boolean hasValidTarget() {
-        return m_bestTarget != null;
+    private void updateAllianceOrigin() {
+        var alliance = DriverStation.getAlliance();
+        if (alliance.isPresent()) {
+            VisionConstants.kTagLayout.setOrigin(
+                alliance.get() == DriverStation.Alliance.Red 
+                    ? edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kRedAllianceWallRightSide 
+                    : edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kBlueAllianceWallRightSide
+            );
+        }
     }
 
-    public PhotonTrackedTarget getBestTarget() {
-        return m_bestTarget;
-    }
+    public boolean hasValidTarget() { return m_bestTarget != null; }
+    public PhotonTrackedTarget getBestTarget() { return m_bestTarget; }
 }

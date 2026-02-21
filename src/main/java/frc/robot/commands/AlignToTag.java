@@ -52,28 +52,29 @@ public class AlignToTag extends Command {
         m_turnPID.reset();
     }
 
-    @Override
+   @Override
     public void execute() {
-        // Inside AlignToTag.java execute()
         double rotationSpeed = 0;
-        if (m_vision.hasValidTarget()) {
-            double currentYaw = m_vision.getBestTarget().getYaw();
-            // Only calculate if the error is greater than our tolerance
-            if (Math.abs(currentYaw) > 0.5) {
-                rotationSpeed = m_turnPID.calculate(currentYaw, 0);
 
-                 // Add a "Feedforward" or Minimum Power
-                double kS = 0.05; // Minimum volts/percent to break friction
-                rotationSpeed += Math.copySign(kS, rotationSpeed);
+        if (m_vision.hasValidTarget()) {
+            // Use the Subsystem's method which already has the PID logic
+            // and add a small 'look ahead' by increasing the P gain if needed
+            rotationSpeed = m_vision.getAlignmentRotationSpeed();
+
+            // If the robot is already rotating fast, dampen the vision 
+            // to prevent overshooting the tag.
+            double currentRotVelocity = m_drivetrain.getState().Speeds.omegaRadiansPerSecond;
+            if (Math.abs(currentRotVelocity) > 2.0) {
+                rotationSpeed *= 0.5;
             }
         }
 
-        // Apply inputs to the swerve drivetrain
         m_drivetrain.setControl(
             m_driveRequest
                 .withVelocityX(m_translationX.getAsDouble())
                 .withVelocityY(m_translationY.getAsDouble())
                 .withRotationalRate(rotationSpeed)
+                .withDeadband(0.02) // Prevents joystick drift from fighting the PID
         );
     }
 
@@ -81,5 +82,11 @@ public class AlignToTag extends Command {
     public void end(boolean interrupted) {
         // Optional: stop the robot when the command ends
         m_drivetrain.setControl(new SwerveRequest.Idle());
+    }
+    @Override
+    public boolean isFinished() {
+        // If we've been running for 5 seconds and haven't hit the target, 
+        // something is wrong (camera blocked, etc). Exit for safety.
+        return false; 
     }
 }

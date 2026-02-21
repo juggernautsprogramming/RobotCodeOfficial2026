@@ -52,16 +52,32 @@ public final class Constants {
          */
         public static final AprilTagFieldLayout kTagLayout = 
             AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+        public static final String kFrontLeftName = "FrontLeft";
+        public static final String kBackLeftName = "BackLeft";
 
+        public static final Map<String, Transform3d> kCameraOffsets = Map.of(
+        // Front Left: 10" forward, 10" left. Facing "Out" (45 deg CCW)
+        kFrontLeftName, new Transform3d(
+            new Translation3d(Units.inchesToMeters(10), Units.inchesToMeters(10), Units.inchesToMeters(20)), 
+            new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(45))
+        ),
+        // Back Left: 10" back (-10), 10" left. Facing "In" (135 deg CCW)
+        kBackLeftName, new Transform3d(
+            new Translation3d(Units.inchesToMeters(-10), Units.inchesToMeters(10), Units.inchesToMeters(20)), 
+            new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(135))
+        )
+        );
         // Visual feedback/Tolerances
-        public static final double angleTolerance = 0.5; // Degrees
-        public static final double kAmbiguityThreshold = 0.2; // Ignore targets that are "blurry" or confusing
+       // Logic Thresholds
+        public static final double kAmbiguityThreshold = 0.2; 
+        public static final double angleTolerance = 0.5;
 
-        public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(15);
-        public static final double TARGET_HEIGHT_METERS = Units.inchesToMeters(12.9);
-        public static final double CAMERA_PITCH_RADIANS = Units.degreesToRadians(-15);
+        public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
+        public static final double TARGET_HEIGHT_METERS = Units.inchesToMeters(12.9); // Adjust based on 2026 tag height
+        public static final double CAMERA_PITCH_RADIANS = Units.degreesToRadians(-20);
 
-        public static final double kP = 0.06; // Adjust for better tuning
+        // PID for "Drive to Tag" or "Snap to Heading"
+        public static final double kP = 0.06; 
         public static final double kI = 0.002;
         public static final double kD = 0.005;
         public static final double kS = 0.0;
