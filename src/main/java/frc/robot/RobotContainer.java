@@ -106,15 +106,26 @@ public class RobotContainer {
 
         //Elevator bindings
         // 1. Left Trigger (Operator): Manual Up (using power)
-        // Adjust the '0.5' to the speed you want
-        DriverStick.leftTrigger().whileTrue(
-            Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
-        ).onFalse(Commands.runOnce(climberSubsystem::stopMotors, climberSubsystem));
-
-        // 2. Left Bumper (Operator): Manual Down (using power)
         DriverStick.leftBumper().whileTrue(
-            Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
-        ).onFalse(Commands.runOnce(climberSubsystem::stopMotors, climberSubsystem));
+            Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
+        ).onFalse(
+        Commands.runOnce(() -> {
+            double currentRotations = climberSubsystem.getCurrentPosition();
+            // setPositionDegrees expects degrees, so we convert rotations back to degrees
+            climberSubsystem.setPositionDegrees(currentRotations * 360.0);
+        }, climberSubsystem)
+        );
+
+        // 2. Right Trigger (or X button): Manual Down. On release, hold position.
+// Note: Changed from Left Bumper to avoid conflict with Gyro Reset
+        DriverStick.leftTrigger().whileTrue(
+             Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
+        ).onFalse(
+            Commands.runOnce(() -> {
+            double currentRotations = climberSubsystem.getCurrentPosition();
+            climberSubsystem.setPositionDegrees(currentRotations * 360.0);
+        }, climberSubsystem)
+        );
     }
 
     public double getCurrentRotation() {

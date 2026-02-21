@@ -13,137 +13,83 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class ClimberSubsystem extends SubsystemBase {
 
-    // CAN IDs for your motors (set these to match your robot's wiring)
     private static final int LEADER_ID = 15;
     private static final int FOLLOWER_ID = 16;
 
-    // TalonFX objects (Kraken X60 motors)
-    private TalonFX leaderMotor;
-    private TalonFX followerMotor;
+    private final TalonFX leaderMotor;
+    private final TalonFX followerMotor;
 
+    // --- Gravity Compensation ---
+    // kG is the amount of voltage (0 to 12) required to keep the elevator 
+    // from falling. Start with 0.0 and increase by 0.1 until it stays still.
+    private static final double kG = 0.2; 
+    private static final double GEAR_RATIO = 1.0; 
 
-    // Encoder constants
-    private static final double TICKS_PER_REV = 2048.0; // TalonFX integrated sensor
-    private static final double GEAR_RATIO = 1.0;       // Adjust if using gearing
+    private static final double CRUISE_VELOCITY = 100; 
+    private static final double ACCELERATION = 200;
 
-    // Motion Magic settings
-    private static final double CRUISE_VELOCITY = 100; // rotations/sec
-    private static final double ACCELERATION = 200;    // rotations/sec^2
-
-    private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0);
-
+    // The '.withSlot(0)' ensures it uses your PID gains to hold position
+    private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0).withSlot(0);
 
     public ClimberSubsystem() {
-        // Create motor objects
         leaderMotor = new TalonFX(LEADER_ID, "ChassisCAN");
-        followerMotor = new TalonFX(FOLLOWER_ID,"ChassisCAN");
-
-        // Set neutral mode (Brake or Coast)  Brake for more accurate stopping
-        leaderMotor.setNeutralMode(NeutralModeValue.Brake);
-        followerMotor.setNeutralMode(NeutralModeValue.Brake);
-
-        // Configure follower
-        // followerMotor will mirror leaderMotor's output automatically
-        // Ensure you are using 'new' and the parameters are (int, boolean)
-        followerMotor.setControl(new Follower(LEADER_ID, MotorAlignmentValue.Aligned));
-        // The second parameter is "opposeMaster" — set to true if the motors are mounted in opposite directions
-
+        followerMotor = new TalonFX(FOLLOWER_ID, "ChassisCAN");
 
         TalonFXConfiguration config = new TalonFXConfiguration();
 
+        // 1. Brake Mode is essential for preventing back-driving
+        config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
         config.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
 
-        // Motion Magic tuning
+        // 2. Motion Magic Tuning
         config.MotionMagic.MotionMagicCruiseVelocity = CRUISE_VELOCITY;
         config.MotionMagic.MotionMagicAcceleration = ACCELERATION;
 
-        // Configure slot 0 for Voltage Control
-        config.Slot0.kP = 2.0; // Example value, tune as needed
+        // 3. PID Gains
+        config.Slot0.kP = 2.0; 
         config.Slot0.kI = 0.0;
         config.Slot0.kD = 0.1;
-        config.Voltage.withPeakForwardVoltage(8).withPeakReverseVoltage(-8);
+        // Gravity Feedforward (Built into the motor controller)
+        config.Slot0.kG = kG; 
 
-        // Configure slot 1 for Torque Control
-        config.Slot1.kP = 60.0; // Example value, tune as needed
-        config.Slot1.kI = 0.0;
-        config.Slot1.kD = 6.0;
-        config.TorqueCurrent.withPeakForwardTorqueCurrent(120).withPeakReverseTorqueCurrent(-120);
+        // Apply config
+        leaderMotor.getConfigurator().apply(config);
+        followerMotor.getConfigurator().apply(config);
 
-        // Apply configurations with retries  Leader
-        StatusCode leaderMotorstatus = StatusCode.StatusCodeNotInitialized;
-        for (int i = 0; i < 5; ++i) {
-            leaderMotorstatus = leaderMotor.getConfigurator().apply(config);
-            if (leaderMotorstatus.isOK()) break;
-        }
-        // Apply configurations with retries Follower
-        StatusCode followerMotorstatus = StatusCode.StatusCodeNotInitialized;
-        for (int i = 0; i < 5; ++i) {
-            followerMotorstatus = followerMotor.getConfigurator().apply(config);
-            if (followerMotorstatus.isOK()) break;
-        }
-
-
-	
-        if (!leaderMotorstatus.isOK()) {
-            System.out.println("Motor configuration failed: " + leaderMotorstatus);
-        }
-  
-
-        leaderMotor.setPosition(0); // Start at 0
+        // 4. Set follower AFTER applying config
+        followerMotor.setControl(new Follower(LEADER_ID, MotorAlignmentValue.Opposed));
+        
+        leaderMotor.setPosition(0);
     }
 
-
-
-    
-    public void disabledInit() {
-        // Stop motors when disabled
-        leaderMotor.stopMotor();
-        followerMotor.stopMotor();
-    }
-
-
-    private void moveToDegrees(double degrees)
-    {
-     
-        //Use encoder   forward 90 degrees back to 0 degree is backward
-        // Convert degrees to rotations
+    /**
+     * Use this method to move and HOLD the climber.
+     * By using MotionMagic, the motor will actively fight gravity to stay at this spot.
+     */
+    public void setPositionDegrees(double degrees) {
         double rotations = (degrees / 360.0) * GEAR_RATIO;
-
-        // Command Motion Magic
         leaderMotor.setControl(motionMagicRequest.withPosition(rotations));
-
     }
 
-
-    public void setPowerLevel(double Power) 
-    {
-        // Example: run leader at 50% output
-        leaderMotor.set(Power);
-        // followerMotor automatically follows — no need to set it here
+    /**
+     * Warning: Calling stopMotor() or setPower(0) will likely let the elevator fall 
+     * unless your kG is perfectly tuned or your gearbox is high-friction.
+     */
+    public void setPowerLevel(double power) {
+        leaderMotor.set(power);
     }
-
-
-    
-    public void stopMotors() 
-    {
-        // Stop motors when disabled
+    public void stopMotors() {
         leaderMotor.stopMotor();
-        followerMotor.stopMotor();
-
     }
-
+    /**
+ * Returns the current position of the leader motor in rotations.
+ */
+    public double getCurrentPosition() {
+        return leaderMotor.getPosition().getValueAsDouble();
+    }
     @Override
-    public void periodic() 
-    {
-         //maybe display things to tab
-    
+    public void periodic() {
+        // Log position to see if it's drifting
+        // SmartDashboard.putNumber("Climber Rotations", leaderMotor.getPosition().getValueAsDouble());
     }
-
-    public void teleopPeriodic() {
-        // Example: run leader at 50% output
-        leaderMotor.set(0.5);
-        // followerMotor automatically follows — no need to set it here
-    }
-
 }
-
