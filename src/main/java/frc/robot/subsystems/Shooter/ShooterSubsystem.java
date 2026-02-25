@@ -10,142 +10,124 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.controls.Follower;
 
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.networktables.NetworkTableInstance;
 
-//shooter system either on or off with buttons
-
+/**
+ * Shooter system that uses Motion Magic for angle control and 
+ * compensates for robot velocity during aiming.
+ */
 public class ShooterSubsystem extends SubsystemBase {
 
-    // CAN IDs for your motors (set these to match your robot's wiring)
+    // CAN IDs for your motors
     private static final int LEADER_ID = 15;
     private static final int FOLLOWER_ID = 16;
 
-    // TalonFX objects (Kraken X60 motors)
+    // Hardware
     private TalonFX leaderMotor;
     private TalonFX followerMotor;
 
+    // Targeting Logic Helper
+    private final AimToHub aimLogic;
 
-    // Encoder constants
-    private static final double TICKS_PER_REV = 2048.0; // TalonFX integrated sensor
-    private static final double GEAR_RATIO = 1.0;       // Adjust if using gearing
-
-    // Motion Magic settings
+    // Constants
+    private static final double GEAR_RATIO = 1.0; // Adjust to your actual pivot gearing
     private static final double CRUISE_VELOCITY = 100; // rotations/sec
     private static final double ACCELERATION = 200;    // rotations/sec^2
 
     private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0);
 
-
     public ShooterSubsystem() {
-        // Create motor objects
+        this.aimLogic = new AimToHub();
+        
         leaderMotor = new TalonFX(LEADER_ID, "ChassisCAN");
-        followerMotor = new TalonFX(FOLLOWER_ID,"ChassisCAN");
+        followerMotor = new TalonFX(FOLLOWER_ID, "ChassisCAN");
 
-        // Set neutral mode (Brake or Coast)  Brake for more accurate stopping
         leaderMotor.setNeutralMode(NeutralModeValue.Brake);
         followerMotor.setNeutralMode(NeutralModeValue.Brake);
 
-        // Configure follower
-        // followerMotor will mirror leaderMotor's output automatically
-        // Ensure you are using 'new' and the parameters are (int, boolean)
+        // Configure follower to mirror leader
         followerMotor.setControl(new Follower(LEADER_ID, MotorAlignmentValue.Aligned));
-        // The second parameter is "opposeMaster" — set to true if the motors are mounted in opposite directions
-
 
         TalonFXConfiguration config = new TalonFXConfiguration();
-
         config.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
 
         // Motion Magic tuning
         config.MotionMagic.MotionMagicCruiseVelocity = CRUISE_VELOCITY;
         config.MotionMagic.MotionMagicAcceleration = ACCELERATION;
 
-        // Configure slot 0 for Voltage Control
-        config.Slot0.kP = 2.0; // Example value, tune as needed
+        // PID Tuning (Slot 0)
+        config.Slot0.kP = 2.0; 
         config.Slot0.kI = 0.0;
         config.Slot0.kD = 0.1;
-        config.Voltage.withPeakForwardVoltage(8).withPeakReverseVoltage(-8);
 
-        // Configure slot 1 for Torque Control
-        config.Slot1.kP = 60.0; // Example value, tune as needed
-        config.Slot1.kI = 0.0;
-        config.Slot1.kD = 6.0;
-        config.TorqueCurrent.withPeakForwardTorqueCurrent(120).withPeakReverseTorqueCurrent(-120);
+        // Apply configs
+        applyMotorConfigs(config);
 
-        // Apply configurations with retries  Leader
-        StatusCode leaderMotorstatus = StatusCode.StatusCodeNotInitialized;
-        for (int i = 0; i < 5; ++i) {
-            leaderMotorstatus = leaderMotor.getConfigurator().apply(config);
-            if (leaderMotorstatus.isOK()) break;
-        }
-        // Apply configurations with retries Follower
-        StatusCode followerMotorstatus = StatusCode.StatusCodeNotInitialized;
-        for (int i = 0; i < 5; ++i) {
-            followerMotorstatus = followerMotor.getConfigurator().apply(config);
-            if (followerMotorstatus.isOK()) break;
-        }
-
-
-	
-        if (!leaderMotorstatus.isOK()) {
-            System.out.println("Motor configuration failed: " + leaderMotorstatus);
-        }
-  
-
-        leaderMotor.setPosition(0); // Start at 0
+        leaderMotor.setPosition(0);
     }
 
-
-
-    
-    public void disabledInit() {
-        // Stop motors when disabled
-        leaderMotor.stopMotor();
-        followerMotor.stopMotor();
+    /**
+     * Helper to apply configs with retries for stability.
+     */
+    private void applyMotorConfigs(TalonFXConfiguration config) {
+        StatusCode leaderStatus = StatusCode.StatusCodeNotInitialized;
+        for (int i = 0; i < 5; ++i) {
+            leaderStatus = leaderMotor.getConfigurator().apply(config);
+            if (leaderStatus.isOK()) break;
+        }
+        
+        if (!leaderStatus.isOK()) {
+            System.out.println("Shooter Leader Config Failed: " + leaderStatus);
+        }
     }
 
-
-    private void moveToDegrees(double degrees)
-    {
-     
-        //Use encoder   forward 90 degrees back to 0 degree is backward
-        // Convert degrees to rotations
+    /**
+     * Commands the shooter pivot to a specific angle using Motion Magic.
+     */
+    public void moveToDegrees(double degrees) {
         double rotations = (degrees / 360.0) * GEAR_RATIO;
-
-        // Command Motion Magic
         leaderMotor.setControl(motionMagicRequest.withPosition(rotations));
-
     }
 
+    /**
+     * The main auto-aiming method. Call this in a command while holding a button.
+     * @param robotSpeeds Current ChassisSpeeds (vx, vy) from the drivetrain.
+     */
+    public void runAutoAim(ChassisSpeeds robotSpeeds) {
+        // 1. Get Limelight data
+        var table = NetworkTableInstance.getDefault().getTable("limelight");
+        double ty = table.getEntry("ty").getDouble(0.0);
+        double tv = table.getEntry("tv").getDouble(0.0);
 
-    public void setPowerLevel(double Power) 
-    {
-        // Example: run leader at 50% output
-        leaderMotor.set(Power);
-        // followerMotor automatically follows — no need to set it here
+        // 2. Only calculate if we see the hub
+        if (tv < 1.0) {
+            return; // Stay at current position or go to home
+        }
+
+        // 3. Use AimToHub to find the 'moving' angle compensation
+        // This accounts for the robot sliding left/right/forward while shooting
+        double targetAngle = aimLogic.calculateMovingAimAngle(
+            robotSpeeds.vyMetersPerSecond, 
+            robotSpeeds.vxMetersPerSecond, 
+            ty
+        );
+
+        // 4. Move pivot to that angle
+        moveToDegrees(targetAngle);
     }
 
+    public void setPowerLevel(double power) {
+        leaderMotor.set(power);
+    }
 
-    
-    public void stopMotors() 
-    {
-        // Stop motors when disabled
+    public void stopMotors() {
         leaderMotor.stopMotor();
         followerMotor.stopMotor();
-
     }
 
     @Override
-    public void periodic() 
-    {
-         //maybe display things to tab
-    
+    public void periodic() {
+        // Standard monitoring (SmartDashboard, etc.) can go here
     }
-
-    public void teleopPeriodic() {
-        // Example: run leader at 50% output
-        leaderMotor.set(0.5);
-        // followerMotor automatically follows — no need to set it here
-    }
-
 }
-
