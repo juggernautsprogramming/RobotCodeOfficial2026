@@ -63,20 +63,26 @@ public class VisionSubsystem extends SubsystemBase {
             .withProperties(Map.of("Number of columns", 2, "Number of rows", 1));
 
         // 3. Initialize Sensors (ReadAprilTag objects)
+        // 3. Initialize Sensors (ReadAprilTag objects)
         for (String name : cameraNames) {
             Transform3d robotToCam = Constants.VisionHardware.kCameraOffsets.getOrDefault(
-                name, Constants.VisionHardware.kDefaultRobotToCam
+                 name, Constants.VisionHardware.kDefaultRobotToCam
             );
 
             ReadAprilTag sensor = new ReadAprilTag(name, robotToCam);
             m_sensors.add(sensor);
 
-            // Add camera stream to Shuffleboard
+            // FIX: Access the camera object from the sensor wrapper and set the limit
+            sensor.getCamera().setFPSLimit(20); // 20 FPS is usually plenty for AprilTags
+
+    // Add camera stream to Shuffleboard
             String hostname = name.toLowerCase(); 
-            String streamUrl = "mjpg:http://" + hostname + ".local:1181/?action=stream";
+            String streamUrl = "http://" + hostname + ".local:1181/?action=stream";
+
             cameraGroup.addCamera("Stream-" + name, name, streamUrl)
-                       .withProperties(Map.of("showControls", false));
-        }
+                .withProperties(Map.of("showControls", false));
+            }
+
 
         // 4. Initialize UI Widgets
         m_tagIdWidget = Constants.ExampleTab.add("Target ID", -1).withPosition(0, 0).getEntry();
