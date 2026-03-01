@@ -14,6 +14,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -24,65 +25,73 @@ import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
 /**
- * VisionSubsystem — PhotonVision multi-camera pose fusion for FRC 2026.
+ * VisionSubsystem — multi-camera PhotonVision pose fusion for FRC 2026.
  *
- * <h3>Design notes</h3>
+ * <h3>Accuracy + latency optimisations</h3>
  * <ul>
- *   <li>{@code getEstimatedGlobalPose()} is called exactly <em>once</em> per
- *       sensor per loop and the result is reused for both fusion and telemetry,
- *       eliminating redundant CPU work from the previous double-call pattern.</li>
- *   <li>Hub-specific AprilTags are tracked separately so
- *       {@link DriveToHubAndShootCommand} can query hub distance/yaw directly.</li>
- *   <li>Vision fusion uses a distance-squared std-dev model: the Kalman filter
- *       trusts the camera more when it is close to the target.</li>
- *   <li>Drive outputs in {@code DriveToHubAndShootCommand} are computed from the
- *       <em>fused odometry pose</em> — never from raw camera angles — so this
- *       subsystem's periodic() never causes jitter in drive commands.</li>
+ *   <li><b>Single result fetch per sensor per loop</b> — {@code periodic()} reads
+ *       each camera's cached result from {@code ReadAprilTag}. There are no duplicate
+ *       JNI calls anywhere in this class.</li>
+ *   <li><b>Ambiguity guard in {@code ReadAprilTag}</b> — frames with high pose
+ *       ambiguity are rejected before the expensive PnP solve runs.</li>
+ *   <li><b>Distance-squared std-dev model</b> — the Kalman filter trusts
+ *       measurements more when the robot is close:
+ *       {@code stdDev = 0.1 + dist² × 0.05}.</li>
+ *   <li><b>Vision freshness check</b> — measurements older than
+ *       {@link #VISION_STALENESS_THRESHOLD_S} are silently dropped, preventing
+ *       the estimator from being poisoned by stale frames after a camera dropout.</li>
+ *   <li><b>Multi-tag bonus</b> — when ≥ 2 tags are visible the std-dev is halved,
+ *       giving the Kalman filter higher confidence in multi-tag solves.</li>
+ *   <li><b>Alliance origin set once</b> — tag layout origin is updated exactly
+ *       once when the DS connects, not every loop.</li>
  * </ul>
  */
 public class VisionSubsystem extends SubsystemBase {
 
+    /** Drop vision measurements older than this (seconds). */
+    private static final double VISION_STALENESS_THRESHOLD_S = 0.150;
+
     private final CommandSwerveDrivetrain m_drivetrain;
     private final List<ReadAprilTag>      m_sensors = new ArrayList<>();
 
-    /** Full-field2d showing the Kalman-fused robot pose. */
+    /** Kalman-fused robot pose visualisation. */
     private final Field2d m_field        = new Field2d();
-    /** Full-field2d showing each camera's raw pose estimate ("ghost"). */
+    /** Per-camera raw pose estimate visualisation ("ghosts"). */
     private final Field2d m_fieldCameras = new Field2d();
 
-    /** Best target across all cameras (highest area = most confident). */
+    /** Best overall target (highest pixel area) across all cameras. */
     private PhotonTrackedTarget m_bestTarget    = null;
     /** Best hub-specific AprilTag target. */
     private PhotonTrackedTarget m_bestHubTarget = null;
-    /** Distance to hub derived from the best hub tag (meters). */
+    /** Distance to hub derived from best hub tag (metres). */
     private double m_hubDistMeters = 0.0;
+    /** FPGA timestamp of the most recently accepted hub measurement (seconds). */
+    private double m_lastHubResultTimestamp = 0.0;
 
     private boolean m_allianceSet = false;
 
-    /** PID for raw yaw-alignment rotation commands (AlignToTag / teleop use). */
+    /** PID for raw yaw-alignment rotation commands (teleop AlignToTag use). */
     private final PIDController m_strafePID;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
     /**
-     * @param cameraNames Names that exactly match what is configured in the
-     *                    PhotonVision web UI. Use the constants in
-     *                    {@link VisionHardware} — e.g.
-     *                    {@code new String[]{VisionHardware.CAMERA_BACK_LEFT,
-     *                                       VisionHardware.CAMERA_BACK_RIGHT}}.
-     * @param drivetrain  The swerve drivetrain whose pose estimator will be fed.
+     * @param cameraNames Names matching the PhotonVision web UI — use
+     *                    {@link VisionHardware} constants.
+     * @param drivetrain  Swerve drivetrain whose pose estimator will be fed.
      */
     public VisionSubsystem(String[] cameraNames, CommandSwerveDrivetrain drivetrain) {
-        this.m_drivetrain = drivetrain;
-        this.m_strafePID  = new PIDController(
+        m_drivetrain = drivetrain;
+        m_strafePID  = new PIDController(
             VisionConstants.kP, VisionConstants.kI, VisionConstants.kD);
-        this.m_strafePID.setTolerance(VisionConstants.angleTolerance);
+        m_strafePID.setTolerance(VisionConstants.angleTolerance);
 
         for (String name : cameraNames) {
             Transform3d robotToCam = VisionHardware.kCameraOffsets.getOrDefault(
                 name, VisionHardware.kDefaultRobotToCam);
             ReadAprilTag sensor = new ReadAprilTag(name, robotToCam);
             m_sensors.add(sensor);
+            // Cap frame rate on each camera to reduce CPU load during vision fusion
             sensor.getCamera().setFPSLimit(20);
         }
 
@@ -99,52 +108,66 @@ public class VisionSubsystem extends SubsystemBase {
         m_bestHubTarget = null;
         m_hubDistMeters = 0.0;
 
-        // Set alliance origin once DS is connected
+        // Set alliance origin exactly once after DS connects
         if (!m_allianceSet && DriverStation.getAlliance().isPresent()) {
             updateAllianceOrigin();
             m_allianceSet = true;
         }
 
-        // Get the current fused pose once — used for both estimation AND ghost telemetry
+        // Current fused pose — read once, reused for every camera this tick
         Pose2d robotPose = m_drivetrain.getState().Pose;
+        // FPGA time used for freshness checks
+        double now = RobotController.getFPGATime() * 1e-6; // µs → s
 
         for (ReadAprilTag sensor : m_sensors) {
-            // Call getEstimatedGlobalPose ONCE and cache the result
+            // Estimate called ONCE per sensor per loop
             var estimateOpt = sensor.getEstimatedGlobalPose(robotPose);
 
             if (estimateOpt.isPresent()) {
                 EstimatedRobotPose estimate = estimateOpt.get();
                 Pose2d             estPose  = estimate.estimatedPose.toPose2d();
 
+                // Freshness guard: drop stale frames
+                double ageSec = now - estimate.timestampSeconds;
+                if (ageSec > VISION_STALENESS_THRESHOLD_S) {
+                    m_fieldCameras.getObject("Ghost-" + sensor.getName())
+                        .setPose(new Pose2d(-10, -10, new Rotation2d()));
+                    continue;
+                }
+
                 // Distance-squared std-dev: less trust at greater distance
                 double dist   = sensor.getAverageDistanceToTags();
                 double stdDev = 0.1 + (dist * dist * 0.05);
+
+                // Multi-tag bonus: halve std-dev when ≥ 2 tags visible (more reliable solve)
+                var result = sensor.getLatestResult();
+                if (result != null && result.getTargets().size() >= 2) {
+                    stdDev *= 0.5;
+                }
 
                 m_drivetrain.addVisionMeasurement(
                     estPose,
                     estimate.timestampSeconds,
                     VecBuilder.fill(stdDev, stdDev, Units.degreesToRadians(30)));
 
-                // Update this camera's ghost pose on the Field2d
                 m_fieldCameras.getObject("Ghost-" + sensor.getName()).setPose(estPose);
             } else {
-                // Push ghost off-field when no estimate available
                 m_fieldCameras.getObject("Ghost-" + sensor.getName())
                     .setPose(new Pose2d(-10, -10, new Rotation2d()));
             }
 
             // Track best overall and best hub-specific targets
             var result = sensor.getLatestResult();
-            if (result.hasTargets()) {
+            if (result != null && result.hasTargets()) {
                 for (PhotonTrackedTarget target : result.getTargets()) {
-                    // Best overall target
                     if (m_bestTarget == null || target.getArea() > m_bestTarget.getArea()) {
                         m_bestTarget = target;
                     }
-                    // Best hub target
                     if (isHubTag(target.getFiducialId())) {
-                        if (m_bestHubTarget == null || target.getArea() > m_bestHubTarget.getArea()) {
+                        if (m_bestHubTarget == null
+                                || target.getArea() > m_bestHubTarget.getArea()) {
                             m_bestHubTarget = target;
+                            m_lastHubResultTimestamp = sensor.getLatestResultTimestamp();
                         }
                     }
                 }
@@ -160,44 +183,45 @@ public class VisionSubsystem extends SubsystemBase {
                 Units.degreesToRadians(m_bestHubTarget.getPitch()));
         }
 
-        // Update main field2d with the latest fused pose (AFTER vision fusion above)
+        // Update main field2d AFTER fusion so it shows the corrected pose
         m_field.setRobotPose(m_drivetrain.getState().Pose);
         updateUI();
     }
 
     // ── Public accessors ──────────────────────────────────────────────────────
 
-    /** True if any AprilTag is currently visible. */
+    /** @return true if any AprilTag is visible. */
     public boolean hasValidTarget()  { return m_bestTarget    != null; }
-    /** True if a hub AprilTag is currently visible. */
+    /** @return true if a hub AprilTag is visible. */
     public boolean hasHubTarget()    { return m_bestHubTarget != null; }
 
-    /** Best overall target (highest pixel area). May be {@code null}. */
+    /** Best overall target (highest area). May be {@code null}. */
     public PhotonTrackedTarget getBestTarget()    { return m_bestTarget;    }
-    /** Best hub AprilTag target. May be {@code null}. */
+    /** Best hub-specific AprilTag target. May be {@code null}. */
     public PhotonTrackedTarget getBestHubTarget() { return m_bestHubTarget; }
 
     /**
-     * Camera-measured distance to the hub (meters). Returns 0.0 when no hub
-     * tag is visible.
-     *
-     * <p><b>Note:</b> for shooting and alignment decisions prefer the
-     * odometry-derived distance in {@code DriveToHubAndShootCommand}, which is
-     * smoother and jitter-free.
+     * FPGA timestamp (seconds) of the most recently seen hub tag result.
+     * Compare against {@code RobotController.getFPGATime() * 1e-6} to determine
+     * how stale the measurement is.
+     */
+    public double getLatestHubResultTimestamp() { return m_lastHubResultTimestamp; }
+
+    /**
+     * Camera-measured distance to the hub (metres).
+     * For shooting decisions prefer the odometry-derived distance in
+     * {@code DriveToHubAndShootCommand}, which is smoother.
      */
     public double getHubDistanceMeters() { return m_hubDistMeters; }
 
-    /**
-     * Yaw to the best hub tag as seen by the camera (degrees).
-     * Positive = tag is to the left of camera center. Returns 0.0 when none visible.
-     */
+    /** Yaw to best hub tag from camera (degrees). 0.0 when none visible. */
     public double getHubTagYawDeg() {
         return m_bestHubTarget != null ? m_bestHubTarget.getYaw() : 0.0;
     }
 
     /**
-     * Distance to the best (any) target in <em>inches</em>.
-     * Kept for compatibility with existing commands such as AlignToTag.
+     * Distance to best (any) target in <b>inches</b>.
+     * Kept for AlignToTag compatibility.
      */
     public double getDistanceToTarget() {
         if (m_bestTarget == null) return 0.0;
@@ -209,7 +233,7 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     /**
-     * PID-based rotation speed toward the best visible tag (rad/s), clamped to ±3.
+     * PID rotation speed toward the best visible tag (rad/s), clamped to ±3.
      * Used by teleop yaw-alignment commands.
      */
     public double getAlignmentRotationSpeed() {
@@ -218,9 +242,9 @@ public class VisionSubsystem extends SubsystemBase {
             m_strafePID.calculate(m_bestTarget.getYaw(), 0.0)));
     }
 
-    /** Field2d showing the Kalman-fused robot pose (drag into Elastic). */
+    /** Field2d showing the Kalman-fused robot pose. */
     public Field2d getField()        { return m_field;        }
-    /** Field2d showing individual camera raw pose estimates. */
+    /** Field2d showing individual camera raw estimates. */
     public Field2d getFieldCameras() { return m_fieldCameras; }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -245,14 +269,14 @@ public class VisionSubsystem extends SubsystemBase {
         SmartDashboard.putBoolean("Vision/Has Hub Target", m_bestHubTarget != null);
 
         if (m_bestTarget != null) {
-            SmartDashboard.putNumber("Vision/Target ID",       m_bestTarget.getFiducialId());
+            SmartDashboard.putNumber("Vision/Target ID",        m_bestTarget.getFiducialId());
             SmartDashboard.putNumber("Vision/Target Yaw (deg)", m_bestTarget.getYaw());
-            SmartDashboard.putNumber("Vision/Distance (in)",   getDistanceToTarget());
+            SmartDashboard.putNumber("Vision/Distance (in)",    getDistanceToTarget());
         }
         if (m_bestHubTarget != null) {
-            SmartDashboard.putNumber("Vision/Hub Tag ID",         m_bestHubTarget.getFiducialId());
-            SmartDashboard.putNumber("Vision/Hub Tag Yaw (deg)",  m_bestHubTarget.getYaw());
-            SmartDashboard.putNumber("Vision/Hub Distance (m)",   m_hubDistMeters);
+            SmartDashboard.putNumber("Vision/Hub Tag ID",        m_bestHubTarget.getFiducialId());
+            SmartDashboard.putNumber("Vision/Hub Tag Yaw (deg)", m_bestHubTarget.getYaw());
+            SmartDashboard.putNumber("Vision/Hub Distance (m)",  m_hubDistMeters);
         }
     }
 }
