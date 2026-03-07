@@ -184,9 +184,9 @@ public final class Constants {
 
         // ── Pivot (hood) hardware — matches ShooterSubsystem ─────────────────
         /** Pivot motor CAN ID (leader). */
-        public static final int PIVOT_LEADER_ID = 15;
+        public static final int PIVOT_LEADER_ID = 99;
         /** Pivot motor CAN ID (follower). */
-        public static final int PIVOT_FOLLOWER_ID = 16;
+        public static final int PIVOT_FOLLOWER_ID = 99;
         /** CAN bus name for the pivot motors. */
         public static final String PIVOT_CAN_BUS = "ChassisCAN";
 
