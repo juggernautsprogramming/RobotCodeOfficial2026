@@ -148,11 +148,22 @@ public void periodic() {
             if (result != null && result.getTargets().size() >= 2) {
                 stdDev *= 0.5;
             }
+            // Skip vision rotation correction entirely when robot is moving fast —
+            // tag switches at speed cause the worst heading corruption
+            var chassisSpeeds = m_drivetrain.getState().Speeds;
+            double speed = Math.hypot(
+                chassisSpeeds.vxMetersPerSecond,
+                chassisSpeeds.vyMetersPerSecond);
+
+        // Only allow vision updates when nearly stopped, and never trust rotation
+            double rotStdDev = speed > 0.5
+                ? Units.degreesToRadians(9999)   // moving — ignore vision rotation completely
+                : Units.degreesToRadians(9999);  // stopped — still ignore, gyro is better
 
             m_drivetrain.addVisionMeasurement(
                 estPose,
                 estimate.timestampSeconds,
-                VecBuilder.fill(stdDev, stdDev, Units.degreesToRadians(30)));
+                VecBuilder.fill(stdDev, stdDev, rotStdDev));
 
             m_fieldCameras.getObject("Ghost-" + sensor.getName()).setPose(estPose);
 

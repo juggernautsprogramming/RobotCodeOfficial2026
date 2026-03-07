@@ -72,17 +72,17 @@ public final class Constants {
         public static final Map<String, Transform3d> kCameraOffsets = Map.of(
             CAMERA_BACK_RIGHT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(-10),   // 10" behind robot center
-                    Units.inchesToMeters(-10),   // 10" to the right
+                    Units.inchesToMeters(10),   // 10" behind robot center
+                    Units.inchesToMeters(10),   // 10" to the right
                     Units.inchesToMeters(20)),   // 20" above floor
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(0))
+                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(90))
             ),
             CAMERA_BACK_LEFT, new Transform3d(
                 new Translation3d(
                     Units.inchesToMeters(-10),   // 10" behind robot center
                     Units.inchesToMeters(10),    // 10" to the left
                     Units.inchesToMeters(20)),   // 20" above floor
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(180))
+                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(285))
             )
         );
 

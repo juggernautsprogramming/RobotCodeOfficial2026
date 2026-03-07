@@ -1,186 +1,295 @@
 package frc.robot.commands;
 
-import java.util.function.DoubleSupplier;
-
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
+import edu.wpi.first.math.controller.ProfiledPIDController;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
+import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Shooter.ShotCalculator;
+import frc.robot.subsystems.Shooter.VelocityCompensator;
 
-/**
- * DriveToHubAndShootCommand — <b>ALIGNMENT TEST MODE</b> (shooting disabled).
- *
- * <p>This configuration exercises only the drive-alignment pipeline so the
- * drivetrain's rotational tracking can be validated before the full
- * shoot-on-the-move pipeline is re-enabled.
- *
- * <h3>Design sources</h3>
- * <ul>
- *   <li><b>6328 (Mechanical Advantage) pose fusion</b> — {@code VisionSubsystem}
- *       feeds PhotonPoseEstimator data into {@code SwerveDrivePoseEstimator} every
- *       loop, giving a Kalman-fused pose used by {@link HubAlignController}.</li>
- *   <li><b>2910 (Jack in the Bot) rotation control</b> — {@link HubAlignController}
- *       uses a {@code ProfiledPIDController} that generates a smooth trapezoidal
- *       rotation profile toward the hub heading. The driver retains full control of
- *       translation (strafe / forward) via the left joystick.</li>
- *   <li><b>1678 (Citrus) alignment gate</b> — {@link #isHubConfirmedActive()} checks
- *       {@code DriverStation.getGameSpecificMessage()} to confirm the hub is active
- *       before declaring alignment.  The FMS check is skipped during practice.</li>
- *   <li><b>frc_v0_calculator physics</b> — {@link ShotCalculator#OPTIMAL_STANDOFF_M}
- *       is precomputed at startup by sweeping distances and picking the one whose
- *       best angle yields the highest shot-quality score. The command drives toward
- *       this distance and displays exactly how close the driver is to the ideal spot.</li>
- * </ul>
- *
- * <h3>Dashboard keys (Shuffleboard / SmartDashboard)</h3>
- * <pre>
- *   DTHS/OptimalDist_m    — physics-computed ideal standoff (meters from hub)
- *   DTHS/OptimalAngle_deg — hood angle at that distance
- *   DTHS/OptimalRPM       — required flywheel RPM at that distance
- *   DTHS/OptimalEntry_deg — hub entry angle at that distance (&gt;35° = good)
- *   DTHS/CurrentDist_m    — robot's actual distance to hub (odometry)
- *   DTHS/DistError_m      — (currentDist − optimalDist), + means too far
- *   DTHS/RotAligned       — rotation error &lt; 1.5°
- *   DTHS/HubActive        — hub confirmed via game message (or no FMS)
- *   DTHS/Aligned          — rotAligned AND hubActive simultaneously
- *   DTHS/ElapsedS         — seconds since command started
- *   DTHS/TimedOut         — true when MAX_RUNTIME_S is exceeded
- * </pre>
- *
- * <h3>To restore shooting</h3>
- * Re-add {@code IShooterSubsystem}, {@code VelocityCompensator},
- * and {@link ReadyToFireCondition} from the pre-test version, and change
- * {@code isFinished()} back to {@code m_shotFired || timedOut}.
- */
 public class DriveToHubAndShootCommand extends Command {
 
-    // ── Safety timeout ─────────────────────────────────────────────────────────
-    private static final double MAX_RUNTIME_S = 10.0;
+    // ── State machine ─────────────────────────────────────────────────────────
+    private enum State {
+        DRIVING,    // Navigate to optimal standoff pose
+        ALIGNING,   // Fine-tune heading, wait for all fire gates
+        FIRING,     // Execute shot
+        DONE
+    }
 
-    // ── Hub centre (field-relative, metres) ────────────────────────────────────
-    // Loaded from the same constant used by HubAlignController so there is one
-    // source of truth for the hub location.
-    private static final Translation2d HUB =
-        frc.robot.Constants.ShooterConstants.HUB_CENTER;
+    // ── Constants ─────────────────────────────────────────────────────────────
+    private static final double MAX_RUNTIME_S    = 8.0;
+    private static final double HOLD_TIME_S      = 0.10;
+    private static final double DRIFT_THRESHOLD_M = 0.5;
+
+    private static final double ZONE_MIN_M = ShotCalculator.OPTIMAL_STANDOFF_M - 0.25;
+    private static final double ZONE_MAX_M = ShotCalculator.OPTIMAL_STANDOFF_M + 0.25;
+
+    private static final Translation2d HUB = ShooterConstants.HUB_CENTER;
+
+    // ── Translation PID controllers ───────────────────────────────────────────
+    // These drive the robot to the optimal field position
+    private final ProfiledPIDController m_xController = new ProfiledPIDController(
+        ShooterConstants.DRIVE_kP, 0, ShooterConstants.DRIVE_kD,
+        new TrapezoidProfile.Constraints(
+            ShooterConstants.DRIVE_MAX_SPEED_MPS,
+            ShooterConstants.DRIVE_MAX_ACCEL));
+
+    private final ProfiledPIDController m_yController = new ProfiledPIDController(
+        ShooterConstants.STRAFE_kP, 0, ShooterConstants.STRAFE_kD,
+        new TrapezoidProfile.Constraints(
+            ShooterConstants.STRAFE_MAX_SPEED_MPS,
+            ShooterConstants.DRIVE_MAX_ACCEL));
 
     // ── Dependencies ──────────────────────────────────────────────────────────
     private final CommandSwerveDrivetrain m_drivetrain;
-    /** Driver forward/back speed (m/s, field-relative). Usually left-stick Y. */
-    private final DoubleSupplier          m_translationX;
-    /** Driver strafe speed (m/s, field-relative). Usually left-stick X. */
-    private final DoubleSupplier          m_translationY;
+    private final ShooterSubsystem        m_shooter;
+    private final HubAlignController      m_alignCtrl = new HubAlignController();
 
-    // ── Controllers ───────────────────────────────────────────────────────────
-    private final HubAlignController m_alignCtrl = new HubAlignController();
-
-    // ── State ─────────────────────────────────────────────────────────────────
-    private double m_startTimeS = 0.0;
+    // ── Per-run state ─────────────────────────────────────────────────────────
+    private State    m_state;
+    private double   m_startTimeS;
+    private double   m_allGreenStartS;
+    private double   m_targetRPM;
+    private double   m_targetHoodDeg;
+    /** The field-relative pose the robot should drive to before shooting. */
+    private Pose2d   m_targetPose;
 
     // ── Constructor ───────────────────────────────────────────────────────────
-
-    /**
-     * @param drivetrain   Swerve drivetrain (required — command owns rotation).
-     * @param translationX Driver forward/back speed supplier (m/s, field-relative).
-     * @param translationY Driver strafe speed supplier (m/s, field-relative).
-     */
     public DriveToHubAndShootCommand(
             CommandSwerveDrivetrain drivetrain,
-            DoubleSupplier          translationX,
-            DoubleSupplier          translationY) {
-        m_drivetrain   = drivetrain;
-        m_translationX = translationX;
-        m_translationY = translationY;
-        addRequirements(drivetrain);
+            ShooterSubsystem shooter) {
+        m_drivetrain = drivetrain;
+        m_shooter    = shooter;
+        addRequirements(drivetrain, shooter);
     }
 
-    // ── Command lifecycle ─────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
     public void initialize() {
-        m_startTimeS = Timer.getFPGATimestamp();
+        m_state          = State.DRIVING;
+        m_startTimeS     = Timer.getFPGATimestamp();
+        m_allGreenStartS = Double.NaN;
+
+        // ── Compute target pose ───────────────────────────────────────────────
+        // Stand at OPTIMAL_STANDOFF_M from hub center, on the same bearing the
+        // robot is currently on so we don't waste time going around the hub.
+        Pose2d currentPose = m_drivetrain.getState().Pose;
+        double bearingRad  = Math.atan2(
+            currentPose.getY() - HUB.getY(),
+            currentPose.getX() - HUB.getX());
+
+        double targetX = HUB.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad);
+        double targetY = HUB.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad);
+
+        // Robot must face the hub (opposite of bearing)
+        Rotation2d targetHeading = new Rotation2d(bearingRad + Math.PI);
+        m_targetPose = new Pose2d(targetX, targetY, targetHeading);
+
+        // Reset translation PIDs to current position
+        m_xController.reset(currentPose.getX());
+        m_yController.reset(currentPose.getY());
+        m_xController.setGoal(targetX);
+        m_yController.setGoal(targetY);
+
         m_alignCtrl.reset();
 
-        // Publish precomputed optimal-shot info immediately so the driver can see
-        // where to position the robot before the command even starts aligning.
-        ShotCalculator.ShotResult opt = ShotCalculator.OPTIMAL_SHOT;
-        SmartDashboard.putNumber ("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
-        SmartDashboard.putNumber ("DTHS/OptimalAngle_deg", opt.hoodDeg());
-        SmartDashboard.putNumber ("DTHS/OptimalRPM",       opt.rpm());
-        SmartDashboard.putNumber ("DTHS/OptimalEntry_deg", opt.entryAngle());
+        // 1323: pre-spin flywheel immediately so robot arrives already at speed
+        m_shooter.setFlywheelRPM(ShooterConstants.IDLE_RPM);
 
-        SmartDashboard.putBoolean("DTHS/Aligned",    false);
-        SmartDashboard.putBoolean("DTHS/RotAligned", false);
-        SmartDashboard.putBoolean("DTHS/HubActive",  false);
-        SmartDashboard.putBoolean("DTHS/TimedOut",   false);
+        publishInit();
+        SmartDashboard.putNumber("DTHS2/TargetPoseX", targetX);
+        SmartDashboard.putNumber("DTHS2/TargetPoseY", targetY);
+        SmartDashboard.putNumber("DTHS2/TargetHeading_deg", targetHeading.getDegrees());
     }
 
     @Override
     public void execute() {
-        // ── 2910 approach: profiled rotation, driver translation ───────────────
-        // compute() runs the ProfiledPIDController toward the hub heading and the
-        // range PID relative to the physics-optimal standoff distance.
-        // In test mode we take only omegaRadS — the driver steers with the joystick.
-        HubAlignController.DriveOutput driveOut =
+        Pose2d robotPose = m_drivetrain.getState().Pose;
+        var    speeds    = m_drivetrain.getState().Speeds;
+
+        // ── FIX 3: Correct distance uses shooter exit, not robot center ───────
+        // Shift the effective robot position forward by SHOOTER_X_OFFSET_METERS
+        // along the robot's current heading before measuring distance to hub.
+        double headingRad    = robotPose.getRotation().getRadians();
+        double shooterX      = robotPose.getX() + ShooterConstants.SHOOTER_X_OFFSET_METERS * Math.cos(headingRad);
+        double shooterY      = robotPose.getY() + ShooterConstants.SHOOTER_X_OFFSET_METERS * Math.sin(headingRad);
+        double distToHub     = new Translation2d(shooterX, shooterY).getDistance(HUB);
+
+        // Velocity-compensated virtual distance
+        var comp = VelocityCompensator.getInstance().compensate(
+            new Translation2d(shooterX, shooterY), HUB,
+            speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+
+        ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
+        m_targetRPM     = shot.rpm();
+        m_targetHoodDeg = shot.hoodDeg();
+
+        // Shooter runs every tick regardless of state (1323 pre-spin)
+        m_shooter.setFlywheelRPM(m_targetRPM);
+        m_shooter.setLaunchAngleDeg(m_targetHoodDeg);
+
+        // Rotation output from HubAlignController (ProfiledPID toward hub)
+        HubAlignController.DriveOutput alignOut =
             m_alignCtrl.compute(m_drivetrain, HUB, ShotCalculator.OPTIMAL_STANDOFF_M);
 
-        m_drivetrain.setControl(
-            new SwerveRequest.FieldCentric()
-                .withVelocityX(m_translationX.getAsDouble())
-                .withVelocityY(m_translationY.getAsDouble())
-                .withRotationalRate(driveOut.omegaRadS()));
+        boolean inZone = distToHub >= ZONE_MIN_M && distToHub <= ZONE_MAX_M;
 
-        // ── 1678 (Citrus) alignment gate ───────────────────────────────────────
-        boolean rotAligned = m_alignCtrl.isAligned();
-        boolean hubActive  = isHubConfirmedActive();
-        boolean aligned    = rotAligned && hubActive;
+        switch (m_state) {
 
-        // ── Distance-to-hub telemetry ──────────────────────────────────────────
-        double currentDist = m_drivetrain.getState().Pose.getTranslation().getDistance(HUB);
-        double distError   = currentDist - ShotCalculator.OPTIMAL_STANDOFF_M;
+            case DRIVING -> {
+                // ── FIX 1: Full field-relative navigation to target pose ───────
+                // X/Y ProfiledPID drives to the computed standoff position while
+                // HubAlignController simultaneously locks rotation onto the hub.
+                double vx = m_xController.calculate(robotPose.getX());
+                double vy = m_yController.calculate(robotPose.getY());
 
-        // ── Telemetry ─────────────────────────────────────────────────────────
+                // Clamp outputs to max speeds
+                vx = Math.max(-ShooterConstants.DRIVE_MAX_SPEED_MPS,
+                     Math.min( ShooterConstants.DRIVE_MAX_SPEED_MPS, vx));
+                vy = Math.max(-ShooterConstants.STRAFE_MAX_SPEED_MPS,
+                     Math.min( ShooterConstants.STRAFE_MAX_SPEED_MPS, vy));
+
+                m_drivetrain.setControl(new SwerveRequest.FieldCentric()
+                    .withVelocityX(vx)
+                    .withVelocityY(vy)
+                    .withRotationalRate(alignOut.omegaRadS()));
+
+                // Log how close we are to the target pose
+                double poseError = robotPose.getTranslation()
+                    .getDistance(m_targetPose.getTranslation());
+                SmartDashboard.putNumber("DTHS2/PoseError_m", poseError);
+
+                if (inZone && poseError < 0.15) m_state = State.ALIGNING;
+            }
+
+            case ALIGNING -> {
+                // ── FIX 2: Only zero translation when truly in zone ───────────
+                // If we've drifted, gently correct with X/Y PIDs rather than
+                // cutting translation entirely.
+                double vx = inZone ? 0.0 : m_xController.calculate(robotPose.getX());
+                double vy = inZone ? 0.0 : m_yController.calculate(robotPose.getY());
+
+                m_drivetrain.setControl(new SwerveRequest.FieldCentric()
+                    .withVelocityX(vx)
+                    .withVelocityY(vy)
+                    .withRotationalRate(alignOut.omegaRadS()));
+
+                boolean aligned    = m_alignCtrl.isAligned();
+                boolean atDist     = inZone;
+                boolean atVelocity = m_shooter.isAtTargetRPM(m_targetRPM);
+                boolean hubActive  = isHubConfirmedActive();
+                boolean allGreen   = aligned && atDist && atVelocity && hubActive;
+
+                if (allGreen) {
+                    if (Double.isNaN(m_allGreenStartS))
+                        m_allGreenStartS = Timer.getFPGATimestamp();
+                    if ((Timer.getFPGATimestamp() - m_allGreenStartS) >= HOLD_TIME_S)
+                        m_state = State.FIRING;
+                } else {
+                    m_allGreenStartS = Double.NaN;
+                }
+
+                // Far outside zone → restart full approach
+                if (distToHub < ZONE_MIN_M - DRIFT_THRESHOLD_M
+                        || distToHub > ZONE_MAX_M + DRIFT_THRESHOLD_M) {
+                    // Recompute target pose from current position
+                    double bearingRad = Math.atan2(
+                        robotPose.getY() - HUB.getY(),
+                        robotPose.getX() - HUB.getX());
+                    m_xController.setGoal(HUB.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad));
+                    m_yController.setGoal(HUB.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad));
+                    m_state = State.DRIVING;
+                    m_allGreenStartS = Double.NaN;
+                }
+
+                publishFireGate(aligned, atDist, atVelocity, hubActive);
+            }
+
+            case FIRING -> {
+                // Hold heading for one tick while shot executes
+                m_drivetrain.setControl(new SwerveRequest.FieldCentric()
+                    .withVelocityX(0.0)
+                    .withVelocityY(0.0)
+                    .withRotationalRate(alignOut.omegaRadS()));
+                m_shooter.shoot();
+                m_state = State.DONE;
+            }
+
+            case DONE -> {}
+        }
+
+        // ── Telemetry ──────────────────────────────────────────────────────────
         double elapsed = Timer.getFPGATimestamp() - m_startTimeS;
-        SmartDashboard.putNumber ("DTHS/CurrentDist_m",  currentDist);
-        SmartDashboard.putNumber ("DTHS/DistError_m",    distError);
-        SmartDashboard.putBoolean("DTHS/Aligned",        aligned);
-        SmartDashboard.putBoolean("DTHS/RotAligned",     rotAligned);
-        SmartDashboard.putBoolean("DTHS/HubActive",      hubActive);
-        SmartDashboard.putBoolean("DTHS/TimedOut",       elapsed >= MAX_RUNTIME_S);
-        SmartDashboard.putNumber ("DTHS/ElapsedS",       elapsed);
+        SmartDashboard.putString ("DTHS2/State",       m_state.name());
+        SmartDashboard.putNumber ("DTHS2/DistToHub_m", distToHub);
+        SmartDashboard.putNumber ("DTHS2/DistError_m", distToHub - ShotCalculator.OPTIMAL_STANDOFF_M);
+        SmartDashboard.putNumber ("DTHS2/ZoneMin_m",   ZONE_MIN_M);
+        SmartDashboard.putNumber ("DTHS2/ZoneMax_m",   ZONE_MAX_M);
+        SmartDashboard.putNumber ("DTHS2/TargetRPM",   m_targetRPM);
+        SmartDashboard.putNumber ("DTHS2/HoodDeg",     m_targetHoodDeg);
+        SmartDashboard.putNumber ("DTHS2/VirtDist_m",  comp.virtualDistanceMeters());
+        SmartDashboard.putNumber ("DTHS2/ElapsedS",    elapsed);
+        SmartDashboard.putBoolean("DTHS2/TimedOut",    elapsed >= MAX_RUNTIME_S);
     }
 
     @Override
     public boolean isFinished() {
-        // Test mode: hold button to maintain rotation alignment; release to stop.
-        // Watch "DTHS/DistError_m" to drive to the optimal position,
-        // then "DTHS/Aligned" lights up when the robot is ready to shoot.
-        return (Timer.getFPGATimestamp() - m_startTimeS) >= MAX_RUNTIME_S;
+        return m_state == State.DONE
+            || (Timer.getFPGATimestamp() - m_startTimeS) >= MAX_RUNTIME_S;
     }
 
     @Override
     public void end(boolean interrupted) {
         m_drivetrain.setControl(new SwerveRequest.Idle());
-        SmartDashboard.putBoolean("DTHS/Aligned",    false);
-        SmartDashboard.putBoolean("DTHS/RotAligned", false);
-        SmartDashboard.putBoolean("DTHS/HubActive",  false);
-        SmartDashboard.putBoolean("DTHS/TimedOut",   false);
+        m_shooter.idleFlywheel();
+        SmartDashboard.putString("DTHS2/State", interrupted ? "INTERRUPTED" : "COMPLETE");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Citrus (1678) approach: confirm the hub is active before declaring aligned.
-     * FMS check is skipped during practice/pit so the team can tune without FMS.
-     */
     private boolean isHubConfirmedActive() {
         if (!DriverStation.isFMSAttached()) return true;
         String msg = DriverStation.getGameSpecificMessage();
         return msg != null && !msg.isEmpty();
+    }
+
+    private void publishInit() {
+        SmartDashboard.putString ("DTHS2/State",           State.DRIVING.name());
+        SmartDashboard.putBoolean("DTHS2/Gate/Aligned",    false);
+        SmartDashboard.putBoolean("DTHS2/Gate/AtDist",     false);
+        SmartDashboard.putBoolean("DTHS2/Gate/AtVelocity", false);
+        SmartDashboard.putBoolean("DTHS2/Gate/HubActive",  false);
+        SmartDashboard.putBoolean("DTHS2/Gate/FIRE",       false);
+        SmartDashboard.putNumber ("DTHS2/Gate/HoldTime_s", 0.0);
+        SmartDashboard.putBoolean("DTHS2/TimedOut",        false);
+        SmartDashboard.putNumber ("DTHS2/ZoneMin_m",       ZONE_MIN_M);
+        SmartDashboard.putNumber ("DTHS2/ZoneMax_m",       ZONE_MAX_M);
+        SmartDashboard.putNumber ("DTHS2/PoseError_m",     0.0);
+    }
+
+    private void publishFireGate(
+            boolean aligned, boolean atDist, boolean atVelocity, boolean hubActive) {
+        SmartDashboard.putBoolean("DTHS2/Gate/Aligned",    aligned);
+        SmartDashboard.putBoolean("DTHS2/Gate/AtDist",     atDist);
+        SmartDashboard.putBoolean("DTHS2/Gate/AtVelocity", atVelocity);
+        SmartDashboard.putBoolean("DTHS2/Gate/HubActive",  hubActive);
+        SmartDashboard.putBoolean("DTHS2/Gate/FIRE",
+            aligned && atDist && atVelocity && hubActive);
+        SmartDashboard.putNumber ("DTHS2/Gate/HoldTime_s",
+            Double.isNaN(m_allGreenStartS) ? 0.0
+                : Timer.getFPGATimestamp() - m_allGreenStartS);
     }
 }

@@ -136,11 +136,11 @@ public class RobotContainer {
         // steers with the left joystick. Dashboard "DTHS/Aligned" lights up
         // when angular error < 1.5° and the hub is confirmed active.
         // Shooting is disabled in this test mode (see DriveToHubAndShootCommand).
-        m_driverStick.b().whileTrue(
+        // ✅ FIXED — matches the updated 2-argument constructor
+        m_driverStick.b().toggleOnTrue(
             new DriveToHubAndShootCommand(
                 drivetrain,
-                () -> -m_driverStick.getLeftY() * kMaxSpeed,
-                () -> -m_driverStick.getLeftX() * kMaxSpeed)
+                shooterSubsystem)
         );
 
         // ── Left Bumper: Gyro reset ───────────────────────────────────────────
