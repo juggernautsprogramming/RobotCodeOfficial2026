@@ -14,7 +14,6 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.Constants.ShooterConstants;
-import frc.robot.commands.DriveToHubAndShootCommand;
 
 /**
  * ShooterSubsystem — pivot angle control (Motion Magic) + flywheel RPM stubs.
@@ -23,8 +22,7 @@ import frc.robot.commands.DriveToHubAndShootCommand;
  * {@code new TalonFX(id, "CANBusName")} is deprecated in Phoenix 6 2026.
  * Use {@code new TalonFX(id, new CANBus("CANBusName"))} instead.
  */
-public class ShooterSubsystem extends SubsystemBase
-        implements DriveToHubAndShootCommand.IShooterSubsystem {
+public class ShooterSubsystem extends SubsystemBase {
 
     // ── Pivot hardware ────────────────────────────────────────────────────────
     private final TalonFX m_pivotLeader;
@@ -74,49 +72,52 @@ public class ShooterSubsystem extends SubsystemBase
         m_pivotLeader.setPosition(0.0);
     }
 
-    // ── IShooterSubsystem implementation ──────────────────────────────────────
+    // ── Shooter control methods ────────────────────────────────────────────────
 
-    @Override
     public void setLaunchAngleDeg(double degrees) {
         m_targetPivotDeg = degrees;
         double rotations = (degrees / 360.0) * ShooterConstants.PIVOT_GEAR_RATIO;
         m_pivotLeader.setControl(m_mmRequest.withPosition(rotations));
     }
 
-    @Override
     public void setFlywheelRPM(double rpm) {
         m_targetRPM = rpm;
         SmartDashboard.putNumber("Shooter/Flywheel Target RPM", rpm);
     }
 
-    @Override
     public void idleFlywheel() {
         setFlywheelRPM(ShooterConstants.IDLE_RPM);
         m_isShooting = false;
     }
 
-    @Override
     public void shoot() {
         m_isShooting = true;
         SmartDashboard.putBoolean("Shooter/Firing", true);
     }
 
-    @Override
     public boolean isAtTargetRPM(double targetRPM) {
-        // Replace with real encoder read when flywheel is wired:
-        //   double currentRPM = m_flywheelLeader.getVelocity().getValueAsDouble() * 60.0;
-        //   return Math.abs(currentRPM - targetRPM) < targetRPM * 0.01;
-        return true; // stub — allows development without flywheel wired
+        // ±50 RPM tolerance gate used by DriveToHubAndShoot's handshake sequence.
+        // Stub returns true until the flywheel encoder is wired. Once wired,
+        // uncomment m_flywheelLeader in the constructor and replace with:
+        //   return Math.abs(getCurrentRPM() - targetRPM) < 50.0;
+        return true;
     }
 
-    @Override
+    /**
+     * Current flywheel speed (RPM).
+     * Returns 0 while the flywheel motor is a stub (encoder not yet wired).
+     * Replace body with:
+     *   {@code return m_flywheelLeader.getVelocity().getValueAsDouble() * 60.0;}
+     */
+    public double getCurrentRPM() {
+        // stub — replace when flywheel TalonFX is wired
+        return 0.0;
+    }
+
     public boolean isAtTargetAngle(double targetDeg) {
         return Math.abs(getCurrentAngleDeg() - targetDeg)
             < ShooterConstants.PIVOT_ANGLE_TOLERANCE_DEG;
     }
-
-    @Override
-    public SubsystemBase asSubsystem() { return this; }
 
     // ── Teleop helpers ────────────────────────────────────────────────────────
 

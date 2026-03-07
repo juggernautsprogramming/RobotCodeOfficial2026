@@ -12,6 +12,7 @@ import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
@@ -23,6 +24,7 @@ import frc.robot.Constants.VisionConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Shooter.ShotCalculator;
 
 /**
  * VisionSubsystem — multi-camera PhotonVision pose fusion for FRC 2026.
@@ -68,6 +70,13 @@ public class VisionSubsystem extends SubsystemBase {
     /** FPGA timestamp of the most recently accepted hub measurement (seconds). */
     private double m_lastHubResultTimestamp = 0.0;
 
+    /** Most recent accepted vision pose estimate (for ghost overlay). */
+    private Pose2d m_lastVisionPose   = null;
+    /** FPGA timestamp (s) of {@link #m_lastVisionPose} — used for ghost fade. */
+    private double m_lastVisionTimeS  = 0.0;
+    /** Hide vision ghost after this many seconds with no accepted estimate. */
+    private static final double GHOST_FADE_S = 0.5;
+
     private boolean m_allianceSet = false;
 
     /** PID for raw yaw-alignment rotation commands (teleop AlignToTag use). */
@@ -97,6 +106,16 @@ public class VisionSubsystem extends SubsystemBase {
 
         SmartDashboard.putData("Vision/Field Map",     m_field);
         SmartDashboard.putData("Vision/Field Cameras", m_fieldCameras);
+
+        // Pre-register Field2d objects so Elastic sees them before any command runs
+        m_field.getObject("Vision Ghost") .setPose(new Pose2d(-10, -10, new Rotation2d()));
+        m_field.getObject("Target Pose")  .setPose(new Pose2d(-10, -10, new Rotation2d()));
+        m_field.getObject("hub-line-ready")   .setPoses(
+            new Pose2d(-10, -10, new Rotation2d()), new Pose2d(-10, -10, new Rotation2d()));
+        m_field.getObject("hub-line-notready").setPoses(
+            new Pose2d(-10, -10, new Rotation2d()), new Pose2d(-10, -10, new Rotation2d()));
+        SmartDashboard.putNumber("Vision/Tag Count",  0);
+        SmartDashboard.putNumber("Vision/Latency ms", -1.0);
     }
 
     // ── Periodic ──────────────────────────────────────────────────────────────
@@ -135,11 +154,28 @@ public class VisionSubsystem extends SubsystemBase {
                     continue;
                 }
 
-                // Distance-squared std-dev: less trust at greater distance
+                // ── Adaptive trust scaling (6328 approach) ───────────────────
+                // Base: less trust (higher stdDev) at greater distance.
                 double dist   = sensor.getAverageDistanceToTags();
                 double stdDev = 0.1 + (dist * dist * 0.05);
 
-                // Multi-tag bonus: halve std-dev when ≥ 2 tags visible (more reliable solve)
+                // Speed penalty: fast motion blurs tag detections, so above
+                // 3 m/s we scale stdDev proportionally — odometry carries more
+                // weight and prevents the pose from "teleporting".
+                var chassisSpeeds = m_drivetrain.getState().Speeds;
+                double speed = Math.hypot(
+                    chassisSpeeds.vxMetersPerSecond,
+                    chassisSpeeds.vyMetersPerSecond);
+                if (speed > 3.0) stdDev *= (speed / 3.0);
+
+                // Ambiguity soft-penalty: instead of hard-rejecting ambiguous
+                // frames (already done in ReadAprilTag for >0.2), we further
+                // scale stdDev so high-ambiguity measurements contribute less.
+                // Scale: 1.0 at ambiguity=0 → 2.0 at kAmbiguityThreshold (0.2).
+                double ambiguity = sensor.getAmbiguity();
+                stdDev *= (1.0 + (ambiguity / VisionConstants.kAmbiguityThreshold));
+
+                // Multi-tag bonus: halve stdDev when ≥ 2 tags visible.
                 var result = sensor.getLatestResult();
                 if (result != null && result.getTargets().size() >= 2) {
                     stdDev *= 0.5;
@@ -151,6 +187,12 @@ public class VisionSubsystem extends SubsystemBase {
                     VecBuilder.fill(stdDev, stdDev, Units.degreesToRadians(30)));
 
                 m_fieldCameras.getObject("Ghost-" + sensor.getName()).setPose(estPose);
+
+                // Track the most recently accepted vision pose for the ghost overlay
+                if (m_lastVisionPose == null || estimate.timestampSeconds > m_lastVisionTimeS) {
+                    m_lastVisionPose  = estPose;
+                    m_lastVisionTimeS = now;
+                }
             } else {
                 m_fieldCameras.getObject("Ghost-" + sensor.getName())
                     .setPose(new Pose2d(-10, -10, new Rotation2d()));
@@ -185,7 +227,14 @@ public class VisionSubsystem extends SubsystemBase {
 
         // Update main field2d AFTER fusion so it shows the corrected pose
         m_field.setRobotPose(m_drivetrain.getState().Pose);
-        updateUI();
+
+        // Live distance to hub — published every loop so Elastic always shows it
+        double distToHub = m_drivetrain.getState().Pose.getTranslation()
+            .getDistance(ShooterConstants.HUB_CENTER);
+        SmartDashboard.putNumber("DTHS/CurrentDist_m", distToHub);
+        SmartDashboard.putNumber("DTHS/DistError_m",   distToHub - ShotCalculator.OPTIMAL_STANDOFF_M);
+
+        updateDashboard();
     }
 
     // ── Public accessors ──────────────────────────────────────────────────────
@@ -264,7 +313,82 @@ public class VisionSubsystem extends SubsystemBase {
                     : edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kBlueAllianceWallRightSide));
     }
 
-    private void updateUI() {
+    /**
+     * 6328-style diagnostic dashboard update — called every 20 ms from {@link #periodic()}.
+     *
+     * <h3>Field2d objects on "Vision/Field Map"</h3>
+     * <ul>
+     *   <li><b>Robot</b>         — Kalman-fused pose (set by {@code m_field.setRobotPose()}).</li>
+     *   <li><b>Vision Ghost</b>  — Most recent accepted PhotonVision estimate, hidden after
+     *                              {@link #GHOST_FADE_S} seconds of no accepted measurement.</li>
+     *   <li><b>Target Pose</b>   — Ghost at the physics-optimal shooting standoff on the
+     *                              current robot-to-hub bearing. Shows where to drive.</li>
+     *   <li><b>hub-line-ready</b>    — Robot→hub line drawn when all fire gates are green.</li>
+     *   <li><b>hub-line-notready</b> — Robot→hub line drawn when gates are not all green.</li>
+     * </ul>
+     *
+     * <h3>SmartDashboard keys</h3>
+     * <pre>
+     *   Vision/Tag Count   — total AprilTags visible across all cameras this tick
+     *   Vision/Latency ms  — pipeline latency of the freshest frame (-1 if none)
+     * </pre>
+     */
+    private void updateDashboard() {
+        Pose2d       robotPose = m_drivetrain.getState().Pose;
+        Translation2d hub      = ShooterConstants.HUB_CENTER;
+        double        now      = RobotController.getFPGATime() * 1e-6;
+
+        // ── 1. Vision Ghost — single aggregate, fades after GHOST_FADE_S ─────────
+        if (m_lastVisionPose != null && (now - m_lastVisionTimeS) < GHOST_FADE_S) {
+            m_field.getObject("Vision Ghost").setPose(m_lastVisionPose);
+        } else {
+            m_field.getObject("Vision Ghost").setPose(new Pose2d(-10, -10, new Rotation2d()));
+        }
+
+        // ── 2. Target Pose — ideal shooting standoff on current robot-to-hub axis ─
+        // Bearing from hub → robot so the robot stands on the far side of the hub.
+        double bearingRad = Math.atan2(
+            robotPose.getY() - hub.getY(),
+            robotPose.getX() - hub.getX());
+        double targetX = hub.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad);
+        double targetY = hub.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad);
+        // Face toward hub (reverse of bearing)
+        Rotation2d targetRot = new Rotation2d(bearingRad + Math.PI);
+        m_field.getObject("Target Pose").setPose(new Pose2d(targetX, targetY, targetRot));
+
+        // ── 3. Robot→hub trajectory line, color-split by fire-gate readiness ─────
+        // Field2d has no native color API, so we use two named objects.
+        // Only the active one gets real poses; the other is hidden off-field.
+        Pose2d hubPose2d = new Pose2d(hub, new Rotation2d());
+        boolean fireReady = SmartDashboard.getBoolean("DTHS2/Gate/FIRE", false);
+        if (fireReady) {
+            m_field.getObject("hub-line-ready")   .setPoses(robotPose, hubPose2d);
+            m_field.getObject("hub-line-notready").setPoses(
+                new Pose2d(-10, -10, new Rotation2d()),
+                new Pose2d(-10, -10, new Rotation2d()));
+        } else {
+            m_field.getObject("hub-line-notready").setPoses(robotPose, hubPose2d);
+            m_field.getObject("hub-line-ready")   .setPoses(
+                new Pose2d(-10, -10, new Rotation2d()),
+                new Pose2d(-10, -10, new Rotation2d()));
+        }
+
+        // ── 4. Vision metadata — aggregate across all cameras ────────────────────
+        int    totalTags       = 0;
+        double bestLatencyMs   = -1.0;
+        for (ReadAprilTag sensor : m_sensors) {
+            var result = sensor.getLatestResult();
+            if (result != null && result.hasTargets()) {
+                totalTags += result.getTargets().size();
+                // Latency = time from image capture to now (ms)
+                double latMs = (now - result.getTimestampSeconds()) * 1000.0;
+                if (bestLatencyMs < 0 || latMs < bestLatencyMs) bestLatencyMs = latMs;
+            }
+        }
+        SmartDashboard.putNumber("Vision/Tag Count",  totalTags);
+        SmartDashboard.putNumber("Vision/Latency ms", bestLatencyMs);
+
+        // ── 5. Standard target telemetry ─────────────────────────────────────────
         SmartDashboard.putBoolean("Vision/Has Target",     m_bestTarget    != null);
         SmartDashboard.putBoolean("Vision/Has Hub Target", m_bestHubTarget != null);
 

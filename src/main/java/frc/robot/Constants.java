@@ -224,11 +224,23 @@ public final class Constants {
         public static final double MIN_ENTRY_ANGLE_DEG = 25.0;
 
         // ── Alignment setpoints & tolerances ─────────────────────────────────
-        /** Desired standoff distance from the hub face to robot center (meters). */
+        /**
+         * Desired standoff distance from the hub face to robot center (meters).
+         * Used as a fallback only; the physics-based optimal distance computed by
+         * {@code ShotCalculator.OPTIMAL_STANDOFF_M} replaces this at runtime.
+         */
         public static final double DESIRED_DISTANCE_METERS = 2.5;
 
         /** Acceptable distance error to allow firing (meters). */
         public static final double DISTANCE_TOLERANCE_METERS = 0.05;
+
+        // ── Optimal-distance sweep (used by ShotCalculator.findOptimalDistance) ──
+        /** Closest distance (m) the sweep will consider. */
+        public static final double OPTIMAL_DIST_MIN_M  = 1.5;
+        /** Farthest distance (m) the sweep will consider. */
+        public static final double OPTIMAL_DIST_MAX_M  = 6.0;
+        /** Resolution of the distance sweep (m). Smaller = more precise, slightly more startup CPU. */
+        public static final double OPTIMAL_DIST_STEP_M = 0.10;
 
         /** Acceptable heading error to allow firing (degrees). */
         public static final double YAW_TOLERANCE_DEG = 1.5;
@@ -243,9 +255,11 @@ public final class Constants {
         public static final double STRAFE_kD            = 0.15;
         public static final double STRAFE_MAX_SPEED_MPS = 2.5;
 
-        public static final double ROTATION_kP        = 5.5;
-        public static final double ROTATION_kD        = 0.25;
-        public static final double ROTATION_MAX_RAD_S = Math.PI * 2.0;
+        public static final double ROTATION_kP             = 5.5;
+        public static final double ROTATION_kD             = 0.25;
+        public static final double ROTATION_MAX_RAD_S      = Math.PI * 2.0;
+        /** Max angular acceleration for the ProfiledPIDController (rad/s²). */
+        public static final double ROTATION_MAX_ACCEL_RAD_S2 = Math.PI * 4.0;
 
         /**
          * Low-pass filter alpha for drive output smoothing.

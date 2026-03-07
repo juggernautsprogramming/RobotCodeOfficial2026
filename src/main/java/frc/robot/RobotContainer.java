@@ -13,6 +13,9 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 // Constants
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants;
+import frc.robot.subsystems.Shooter.ShotCalculator;
+
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 // Subsystems
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -22,6 +25,7 @@ import frc.robot.subsystems.Climber.ClimberSubsystem;
 
 // Commands
 import frc.robot.commands.AlignToTag;
+import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.DriveToHubAndShootCommand;
 import frc.robot.commands.TurnToAngle;
 
@@ -92,6 +96,13 @@ public class RobotContainer {
         // 4. Climber
         climberSubsystem = new ClimberSubsystem();
 
+        // Publish static shot-calculator results once so Elastic can see the
+        // DTHS/* keys immediately on connect, before the command ever runs.
+        SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
+        SmartDashboard.putNumber("DTHS/OptimalAngle_deg", ShotCalculator.OPTIMAL_SHOT.hoodDeg());
+        SmartDashboard.putNumber("DTHS/OptimalRPM",       ShotCalculator.OPTIMAL_SHOT.rpm());
+        SmartDashboard.putNumber("DTHS/OptimalEntry_deg", ShotCalculator.OPTIMAL_SHOT.entryAngle());
+
         configureBindings();
     }
 
@@ -120,12 +131,16 @@ public class RobotContainer {
             )
         );
 
-        // ── B Button: Drive to Hub + Shoot (hold) ─────────────────────────────
-        // Automatically drives to the hub, calculates the optimal shot angle,
-        // pre-spins the flywheel, and fires when all conditions are met.
-        // The command ends automatically after one shot; release early to abort.
+        // ── B Button: Hub alignment test (hold) ───────────────────────────────
+        // ProfiledPIDController locks rotation onto the hub while the driver
+        // steers with the left joystick. Dashboard "DTHS/Aligned" lights up
+        // when angular error < 1.5° and the hub is confirmed active.
+        // Shooting is disabled in this test mode (see DriveToHubAndShootCommand).
         m_driverStick.b().whileTrue(
-            new DriveToHubAndShootCommand(drivetrain, visionSubsystem, shooterSubsystem)
+            new DriveToHubAndShootCommand(
+                drivetrain,
+                () -> -m_driverStick.getLeftY() * kMaxSpeed,
+                () -> -m_driverStick.getLeftX() * kMaxSpeed)
         );
 
         // ── Left Bumper: Gyro reset ───────────────────────────────────────────
@@ -137,6 +152,14 @@ public class RobotContainer {
         // ── A Button: Emergency brake ─────────────────────────────────────────
         m_driverStick.a().whileTrue(
             drivetrain.applyRequest(() -> m_brake)
+        );
+
+        // ── X Button: Drive to Hub + Shoot (full autonomous sequence) ────────
+        // State machine: DRIVING → ALIGNING → FIRING → DONE.
+        // Flywheel pre-spins on press. Fires automatically when all three gates
+        // pass (aligned < 1.5°, in zone ±0.25 m, RPM ±50). Watch DTHS2/* keys.
+        m_driverStick.x().whileTrue(
+            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
         // ── Y Button: Quick-turn 180° ─────────────────────────────────────────

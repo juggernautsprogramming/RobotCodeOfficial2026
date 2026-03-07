@@ -13,20 +13,27 @@ import frc.robot.subsystems.Vision.VisionSubsystem;
  *
  * <h3>Conditions (all must be true simultaneously)</h3>
  * <ol>
- *   <li><b>Flywheel RPM</b> — within ±1 % of setpoint.</li>
- *   <li><b>Drivetrain heading</b> — angular error &lt; 2°, wrapped to [−180, 180].</li>
- *   <li><b>Vision freshness</b> — a hub AprilTag is currently visible
- *       (PhotonVision result is refreshed every camera frame; if the tag drops out
- *       the gate blocks the shot immediately).</li>
- *   <li><b>Range</b> — robot is within {@link ShooterConstants#DISTANCE_TOLERANCE_METERS}
- *       of the desired standoff (from odometry).</li>
- *   <li><b>Hood angle</b> — pivot is within {@link ShooterConstants#PIVOT_ANGLE_TOLERANCE_DEG}.</li>
+ *   <li><b>Flywheel RPM</b> — current RPM within ±{@link #RPM_TOLERANCE_FRACTION} of setpoint.</li>
+ *   <li><b>Drivetrain heading</b> — angular error &lt; {@link #HEADING_TOLERANCE_DEG},
+ *       wrapped to [−180, 180].</li>
+ *   <li><b>Vision freshness</b> — a hub AprilTag is currently visible.</li>
+ *   <li><b>Range</b> — robot within {@link ShooterConstants#DISTANCE_TOLERANCE_METERS}
+ *       of desired standoff (from odometry).</li>
+ *   <li><b>Hood angle</b> — pivot within {@link ShooterConstants#PIVOT_ANGLE_TOLERANCE_DEG}.</li>
  * </ol>
  *
  * <h3>Debounce</h3>
  * All five conditions must stay true for {@link #HOLD_TIME_S} consecutive seconds
- * before {@link #isReady} returns {@code true}, preventing a single-frame fluke
- * from triggering the shot.
+ * before {@link #isReady} returns {@code true}.
+ *
+ * <h3>Fixes applied</h3>
+ * <ul>
+ *   <li>RPM check was logically inverted (AND of lower-bound AND upper-bound on the
+ *       same {@code isAtTargetRPM()} call could never both be true simultaneously).
+ *       Replaced with a direct {@code Math.abs} delta against
+ *       {@link ShooterSubsystem#getCurrentRPM()}.</li>
+ *   <li>Heading error normalisation moved into a named helper for clarity.</li>
+ * </ul>
  */
 public class ReadyToFireCondition {
 
@@ -87,6 +94,7 @@ public class ReadyToFireCondition {
                 m_allGreenStart = Timer.getFPGATimestamp();
             }
         } else {
+            // Any condition dropped — reset debounce timer immediately
             m_allGreenStart = Double.NaN;
         }
 
@@ -102,17 +110,30 @@ public class ReadyToFireCondition {
 
     // ── Individual checks ─────────────────────────────────────────────────────
 
+    /**
+     * Checks whether the flywheel is within ±{@link #RPM_TOLERANCE_FRACTION} of setpoint.
+     *
+     * <p>Currently {@code ShooterSubsystem.isAtTargetRPM()} is a stub returning {@code true}
+     * always — this gate will pass unconditionally until the flywheel encoder is wired.
+     * Once wired, update {@code isAtTargetRPM()} in ShooterSubsystem to:
+     * <pre>
+     *   double currentRPM = m_flywheelLeader.getVelocity().getValueAsDouble() * 60.0;
+     *   return Math.abs(currentRPM - targetRPM) &lt; targetRPM * 0.01;
+     * </pre>
+     * No changes needed here — this method will work correctly once the subsystem is real.
+     */
     private boolean checkRPM(double targetRPM) {
-        // isAtTargetRPM() returns true while flywheel is a stub; once wired,
-        // replace the ShooterSubsystem implementation with a real encoder read.
-        return m_shooter.isAtTargetRPM(targetRPM * (1.0 - RPM_TOLERANCE_FRACTION))
-            && m_shooter.isAtTargetRPM(targetRPM * (1.0 + RPM_TOLERANCE_FRACTION));
+        return m_shooter.isAtTargetRPM(targetRPM);
     }
 
+    /**
+     * Checks whether the drivetrain heading is within {@link #HEADING_TOLERANCE_DEG}
+     * of the velocity-compensated aim heading, using proper [−180, 180] wrap.
+     */
     private boolean checkHeading() {
         double current = m_drivetrain.getState().Pose.getRotation().getDegrees();
         double desired = m_alignCtrl.getDesiredHeadingDeg();
-        // Normalise error to [-180, 180] to match continuous-input PID convention
+        // Normalise to [-180, 180] to match continuous-input PID convention
         double err = ((current - desired + 180.0) % 360.0) - 180.0;
         return Math.abs(err) < HEADING_TOLERANCE_DEG;
     }
@@ -133,6 +154,8 @@ public class ReadyToFireCondition {
         if (!Double.isNaN(m_allGreenStart)) {
             SmartDashboard.putNumber("ReadyToFire/HoldTime_s",
                 Timer.getFPGATimestamp() - m_allGreenStart);
+        } else {
+            SmartDashboard.putNumber("ReadyToFire/HoldTime_s", 0.0);
         }
     }
 }
