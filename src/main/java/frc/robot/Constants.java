@@ -1,5 +1,8 @@
 package frc.robot;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Map;
 
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
@@ -11,6 +14,8 @@ import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Filesystem;
 
 /**
  * Central constants file for the FRC 2026 robot.
@@ -94,9 +99,18 @@ public final class Constants {
     public static final class VisionConstants {
 
         /** 2026 field AprilTag layout — used by PhotonPoseEstimator. */
-        public static final AprilTagFieldLayout kTagLayout =
-            AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
-
+        public static AprilTagFieldLayout kTagLayout;
+                static {
+                    try {
+                        // This looks for the file you just put in src/main/deploy
+                        Path path = Filesystem.getDeployDirectory().toPath().resolve("custom_hub.json");
+                        kTagLayout = new AprilTagFieldLayout(path);
+                    } catch (IOException e) {
+                        DriverStation.reportError("Could not load custom AprilTag layout!", e.getStackTrace());
+                        // Fallback to empty layout if file is missing
+                        kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+            }
+        }
         /**
          * Maximum pose ambiguity ratio accepted from a single-tag solve.
          * Range [0, 1]; lower = stricter. 0.2 is a good starting point.
@@ -116,8 +130,10 @@ public final class Constants {
         /** Height of the generic (non-hub) tag target center above floor (meters). */
         public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(12.9);
         /** Camera pitch angle (radians, negative = tilted up). */
-        public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(-20);
-
+        public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(20);
+        // In VisionConstants:
+        /** Height of the hub AprilTag center above the floor (meters). */
+        public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(24.0); // measure and update
         private VisionConstants() {}
     }
 
@@ -151,7 +167,7 @@ public final class Constants {
          * AprilTag IDs that are attached to / centered on the hub.
          * Check the 2026 game manual and update before competition.
          */
-        public static final int[] HUB_APRIL_TAG_IDS = {4, 19};
+        public static final int[] HUB_APRIL_TAG_IDS = {8,9,11, 19};
 
         // ── Shooter mechanism geometry ────────────────────────────────────────
         /** Height of the game-piece exit point above the floor (meters). */
