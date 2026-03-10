@@ -24,9 +24,9 @@ import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Climber.ClimberSubsystem;
 
 // Commands
-import frc.robot.commands.AlignToTag;
 import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.DriveToHubAndShootCommand;
+import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurnToAngle;
 
 /**
@@ -120,10 +120,12 @@ public class RobotContainer {
             )
         );
 
-        // ── Right Bumper: AlignToTag (hold) ───────────────────────────────────
-        // Snaps heading to the nearest tag while the driver controls translation.
-        m_driverStick.rightBumper().whileTrue(
-            new AlignToTag(
+        // ── Right Bumper: Snap heading to nearest visible AprilTag ───────────
+        // Press once → robot rotates to face whatever tag is visible right now.
+        // Driver keeps full X/Y translation control during the snap.
+        // Finishes automatically when within ±1° for 0.1 s.
+        m_driverStick.rightBumper().onTrue(
+            new SnapHeadingToTag(
                 drivetrain,
                 visionSubsystem,
                 () -> -m_driverStick.getLeftY() * kMaxSpeed,

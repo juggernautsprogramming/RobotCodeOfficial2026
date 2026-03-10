@@ -111,6 +111,12 @@ public final class Constants {
                         kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
             }
         }
+        // ── 2026 Reefscape field dimensions ──────────────────────────────────
+        /** Full field length — from blue wall to red wall (metres). */
+        public static final double FIELD_LENGTH_M = 17.548;
+        /** Full field width (metres). */
+        public static final double FIELD_WIDTH_M  =  8.052;
+
         /**
          * Maximum pose ambiguity ratio accepted from a single-tag solve.
          * Range [0, 1]; lower = stricter. 0.2 is a good starting point.
@@ -135,6 +141,47 @@ public final class Constants {
         /** Height of the hub AprilTag center above the floor (meters). */
         public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(24.0); // measure and update
         private VisionConstants() {}
+    }
+
+    // =========================================================================
+    // DRIVE TO POSE — ProfiledPID gains & tolerances for DriveToPose command
+    // =========================================================================
+
+    public static final class DriveToPoseConstants {
+
+        // ── Translation ProfiledPID (X and Y share the same gains) ───────────
+        public static final double kP_XY   = 3.5;
+        public static final double kI_XY   = 0.0;
+        public static final double kD_XY   = 0.15;
+        /** Maximum approach speed (m/s). */
+        public static final double MAX_VEL_MPS    = 3.0;
+        /** Maximum approach acceleration (m/s²). */
+        public static final double MAX_ACCEL_MPS2 = 4.0;
+
+        // ── Heading ProfiledPID ───────────────────────────────────────────────
+        public static final double kP_THETA  = 5.5;
+        public static final double kI_THETA  = 0.0;
+        public static final double kD_THETA  = 0.25;
+        /** Maximum rotation speed (rad/s). */
+        public static final double MAX_OMEGA_RAD_S   = Math.PI * 2.0;
+        /** Maximum angular acceleration (rad/s²). */
+        public static final double MAX_ALPHA_RAD_S2  = Math.PI * 4.0;
+
+        // ── At-goal tolerances ────────────────────────────────────────────────
+        /** XY tolerance before "at goal" (metres). ~1.5 inches. */
+        public static final double XY_TOLERANCE_M      = Units.inchesToMeters(1.5);
+        /** Heading tolerance before "at goal" (radians). 1 degree. */
+        public static final double THETA_TOLERANCE_RAD = Units.degreesToRadians(1.0);
+
+        // ── Debounce & safety ─────────────────────────────────────────────────
+        /** Robot must stay within tolerance for this long before isFinished (seconds). */
+        public static final double DEBOUNCE_S       = 0.10;
+        /** Kill-switch: abort if the command runs longer than this (seconds). */
+        public static final double MAX_RUNTIME_S    = 5.0;
+        /** Joystick axis magnitude that triggers driver override. */
+        public static final double OVERRIDE_DEADBAND = 0.15;
+
+        private DriveToPoseConstants() {}
     }
 
     // =========================================================================

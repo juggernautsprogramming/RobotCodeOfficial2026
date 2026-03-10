@@ -2,11 +2,11 @@ package frc.robot.subsystems.Vision;
 
 import static frc.robot.Constants.VisionConstants.*;
 
-import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,127 +17,156 @@ import org.photonvision.PhotonPoseEstimator.PoseStrategy;
 import org.photonvision.targeting.PhotonPipelineResult;
 
 /**
- * ReadAprilTag — single-camera wrapper using the PhotonVision 2026 API.
+ * ReadAprilTag — single-camera AprilTag pose estimator wrapper.
  *
- * <h3>Deprecation fixes vs the previous version</h3>
- * <table>
- *   <tr><th>Old (deprecated)</th><th>New (2026)</th></tr>
- *   <tr><td>{@code camera.getLatestResult()}</td>
- *       <td>{@code camera.getAllUnreadResults()} — returns every frame since
- *           the last call; we keep the freshest one</td></tr>
- *   <tr><td>{@code new PhotonPoseEstimator(layout, strategy, Transform3d)}</td>
- *       <td>{@code new PhotonPoseEstimator(layout, strategy, camera, robotToCam)}
- *           — 4-arg constructor that owns the camera reference</td></tr>
- *   <tr><td>{@code estimator.setReferencePose()} +
- *           {@code estimator.update(result)}</td>
- *       <td>{@code estimator.update(result)} — reference pose no longer needed;
- *           the estimator resolves ambiguity internally</td></tr>
- *   <tr><td>{@code estimator.setMultiTagFallbackStrategy()}</td>
- *       <td>Not needed — LOWEST_AMBIGUITY is the default fallback in 2026</td></tr>
- * </table>
+ * <p><b>Design:</b> This is a plain (non-Subsystem) data-provider class.
+ * {@link VisionSubsystem} calls {@link #update()} explicitly at the top of its
+ * periodic, which guarantees that fresh data is always available when
+ * VisionSubsystem processes it — no CommandScheduler ordering dependency.
+ *
+ * <h3>Key behaviours</h3>
+ * <ul>
+ *   <li><b>All-frames processing</b> — {@link #update()} drains
+ *       {@code getAllUnreadResults()} and runs the pose estimator on <em>every</em>
+ *       new frame, not just the latest. Each result retains its own FPGA timestamp,
+ *       so latency compensation in the Kalman filter is fully utilised.</li>
+ *   <li><b>Primary strategy</b> — {@code MULTI_TAG_PNP_ON_COPROCESSOR} for the
+ *       highest geometric accuracy when ≥ 2 tags are visible.</li>
+ *   <li><b>Fallback strategy</b> — {@code LOWEST_AMBIGUITY} for single-tag frames,
+ *       with a hard ambiguity ceiling defined by {@code kAmbiguityThreshold}.</li>
+ * </ul>
  */
-public class ReadAprilTag extends SubsystemBase {
+public class ReadAprilTag {
 
     private final PhotonCamera        m_camera;
     private final PhotonPoseEstimator m_poseEstimator;
     private final Transform3d         m_robotToCam;
 
-    /** Most recent pipeline result — updated exactly once per loop tick. */
-    private PhotonPipelineResult m_lastResult = null;
+    /** Most recent pipeline result — used by accessors. */
+    private PhotonPipelineResult m_latestResult = null;
+
+    /**
+     * All new pose estimates produced during the last {@link #update()} call.
+     * Cleared and repopulated on every update.
+     */
+    private final List<EstimatedRobotPose> m_newEstimates = new ArrayList<>();
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
+    /**
+     * @param cameraName  Must match the name configured in the PhotonVision web UI.
+     * @param robotToCam  3-D transform from robot-center to camera lens
+     *                    (forward=+X, left=+Y, up=+Z in WPILib convention).
+     */
     public ReadAprilTag(String cameraName, Transform3d robotToCam) {
         m_camera     = new PhotonCamera(cameraName);
         m_robotToCam = robotToCam;
 
-        // 2026 non-deprecated constructor: camera + robotToCam are passed directly.
         m_poseEstimator = new PhotonPoseEstimator(
             kTagLayout,
             PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
             m_robotToCam);
+
+        // Single-tag fallback: pick the candidate with the lowest ambiguity ratio
+        m_poseEstimator.setMultiTagFallbackStrategy(PoseStrategy.LOWEST_AMBIGUITY);
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    // ── Update (called by VisionSubsystem) ───────────────────────────────────
 
     /**
-     * Estimate the robot's global pose from the latest accepted frame.
-     * Returns empty when no result, no targets, or ambiguity is too high.
+     * Drains all unread camera frames and runs the pose estimator on each.
+     * Must be called once at the start of VisionSubsystem's periodic loop.
      *
-     * @param prevEstimatedPose Kept for API compatibility with VisionSubsystem;
-     *                          the 2026 estimator no longer requires a reference pose.
+     * <p>Processing every frame (rather than discarding intermediates) lets the
+     * Kalman filter apply full latency compensation using each frame's FPGA
+     * timestamp.
      */
-    public Optional<EstimatedRobotPose> getEstimatedGlobalPose(Pose2d prevEstimatedPose) {
-        if (m_lastResult == null || !m_lastResult.hasTargets()) return Optional.empty();
+    public void update() {
+        m_newEstimates.clear();
 
-        // Reject ambiguous single-tag frames before running the expensive PnP solve
-        if (m_lastResult.getTargets().size() == 1
-                && m_lastResult.getBestTarget().getPoseAmbiguity() > kAmbiguityThreshold) {
-            return Optional.empty();
+        List<PhotonPipelineResult> unread = m_camera.getAllUnreadResults();
+        if (unread.isEmpty()) return;
+
+        for (PhotonPipelineResult result : unread) {
+            if (!result.hasTargets()) continue;
+
+            // Hard ambiguity gate for single-tag frames before running PnP solve
+            if (result.getTargets().size() == 1
+                    && result.getBestTarget().getPoseAmbiguity() > kAmbiguityThreshold) {
+                continue;
+            }
+
+            Optional<EstimatedRobotPose> estimate = m_poseEstimator.update(result);
+            estimate.ifPresent(m_newEstimates::add);
         }
 
-        // 2026 API: update(result) — no setReferencePose() call needed
-        return m_poseEstimator.update(m_lastResult);
+        // Keep the chronologically latest result for accessors (distance, ambiguity, etc.)
+        m_latestResult = unread.get(unread.size() - 1);
+
+        publishTelemetry();
     }
 
-    /** Average 3D distance to all currently tracked tags (metres). 0 if none visible. */
+    // ── Public accessors ──────────────────────────────────────────────────────
+
+    /**
+     * All new pose estimates from the last {@link #update()} call, in chronological
+     * order. Returns an unmodifiable view — do not mutate.
+     */
+    public List<EstimatedRobotPose> getNewEstimates() {
+        return Collections.unmodifiableList(m_newEstimates);
+    }
+
+    /**
+     * Average 3-D camera-to-tag distance across all targets in the latest
+     * pipeline result (metres). Returns 0.0 when no targets are visible.
+     */
     public double getAverageDistanceToTags() {
-        if (m_lastResult == null || !m_lastResult.hasTargets()) return 0.0;
-        var targets = m_lastResult.getTargets();
+        if (m_latestResult == null || !m_latestResult.hasTargets()) return 0.0;
+        var targets = m_latestResult.getTargets();
         double total = 0.0;
         for (var t : targets) total += t.getBestCameraToTarget().getTranslation().getNorm();
         return total / targets.size();
     }
 
-    /** Pose ambiguity of the best visible target [0, 1]. Returns 1.0 when none visible. */
+    /**
+     * Pose ambiguity of the best target in the latest result, range [0, 1].
+     * Returns 1.0 when no targets are visible (worst-case, maximum penalty).
+     */
     public double getAmbiguity() {
-        if (m_lastResult == null || !m_lastResult.hasTargets()) return 1.0;
-        return m_lastResult.getBestTarget().getPoseAmbiguity();
-    }
-
-    /** Distance to the single best target (metres). 0 if none visible. */
-    public double getBestTargetDistance() {
-        if (m_lastResult == null || !m_lastResult.hasTargets()) return 0.0;
-        return m_lastResult.getBestTarget().getBestCameraToTarget().getTranslation().getNorm();
+        if (m_latestResult == null || !m_latestResult.hasTargets()) return 1.0;
+        return m_latestResult.getBestTarget().getPoseAmbiguity();
     }
 
     /**
-     * FPGA timestamp (seconds) of the most recent pipeline result.
-     * Returns 0.0 if no result has been received yet.
+     * FPGA timestamp of the most recently received pipeline result (seconds).
+     * Returns 0.0 before the first frame arrives.
      */
     public double getLatestResultTimestamp() {
-        return m_lastResult != null ? m_lastResult.getTimestampSeconds() : 0.0;
+        return m_latestResult != null ? m_latestResult.getTimestampSeconds() : 0.0;
     }
 
-    public PhotonCamera         getCamera()       { return m_camera; }
+    public PhotonCamera         getCamera()       { return m_camera;       }
     public String               getName()         { return m_camera.getName(); }
-    public PhotonPipelineResult getLatestResult() { return m_lastResult; }
+    public PhotonPipelineResult getLatestResult() { return m_latestResult; }
 
-    // ── Periodic ─────────────────────────────────────────────────────────────
+    // ── Telemetry ─────────────────────────────────────────────────────────────
 
-    @Override
-    public void periodic() {
-        // getAllUnreadResults() returns every new frame since the last call.
-        // Taking the last element gives us the freshest frame with no skipped frames.
-        // This replaces the deprecated getLatestResult() which could return stale data.
-        List<PhotonPipelineResult> unread = m_camera.getAllUnreadResults();
-        if (!unread.isEmpty()) {
-            m_lastResult = unread.get(unread.size() - 1);
-        }
-
+    private void publishTelemetry() {
         String  prefix    = "Vision/" + m_camera.getName() + "/";
-        boolean hasTarget = m_lastResult != null && m_lastResult.hasTargets();
+        boolean hasTarget = m_latestResult != null && m_latestResult.hasTargets();
 
         SmartDashboard.putBoolean(prefix + "Has Target", hasTarget);
         if (hasTarget) {
             SmartDashboard.putNumber(prefix + "Best Tag ID",
-                m_lastResult.getBestTarget().getFiducialId());
+                m_latestResult.getBestTarget().getFiducialId());
             SmartDashboard.putNumber(prefix + "Target Count",
-                m_lastResult.getTargets().size());
+                m_latestResult.getTargets().size());
             SmartDashboard.putNumber(prefix + "Avg Distance M",
                 getAverageDistanceToTags());
             SmartDashboard.putNumber(prefix + "Ambiguity",
-                m_lastResult.getBestTarget().getPoseAmbiguity());
+                m_latestResult.getBestTarget().getPoseAmbiguity());
+            SmartDashboard.putNumber(prefix + "New Estimates",
+                m_newEstimates.size());
         }
     }
 }
