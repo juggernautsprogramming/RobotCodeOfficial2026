@@ -5,6 +5,7 @@ import static edu.wpi.first.units.Units.*;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -25,7 +26,6 @@ import frc.robot.subsystems.Climber.ClimberSubsystem;
 
 // Commands
 import frc.robot.commands.DriveToHubAndShoot;
-import frc.robot.commands.DriveToHubAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurnToAngle;
 
@@ -116,7 +116,7 @@ public class RobotContainer {
                 m_drive
                     .withVelocityX(-m_driverStick.getLeftY()  * kMaxSpeed)
                     .withVelocityY(-m_driverStick.getLeftX()  * kMaxSpeed)
-                    .withRotationalRate(-m_driverStick.getRightX() * kMaxAngularRate)
+                    .withRotationalRate(-MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15) * kMaxAngularRate)
             )
         );
 
@@ -133,15 +133,11 @@ public class RobotContainer {
             )
         );
 
-        // ── B Button: Hub alignment test (hold) ───────────────────────────────
-        // ProfiledPIDController locks rotation onto the hub while the driver
-        // steers with the left joystick. Dashboard "DTHS/Aligned" lights up
-        // when angular error < 1.5° and the hub is confirmed active.
-        m_driverStick.b().toggleOnTrue(
-            new DriveToHubAndShootCommand(
-                drivetrain,
-                shooterSubsystem,
-                visionSubsystem)
+        // ── B Button: Drive to hub + shoot ───────────────────────────────────
+        // Measures current distance to hub, drives to optimal standoff,
+        // aligns to hub center, and fires when all gates pass.
+        m_driverStick.b().whileTrue(
+            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
         // ── Left Bumper: Gyro reset ───────────────────────────────────────────
@@ -163,8 +159,8 @@ public class RobotContainer {
             new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
-        // ── Y Button: Quick-turn 180° ─────────────────────────────────────────
-        m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 180, false));
+        // ── Y Button: Quick-turn 45° ──────────────────────────────────────────
+        m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 45, false));
 
         // ── D-Pad: Precision nudge ────────────────────────────────────────────
         m_driverStick.povUp()   .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityX( kNudgeSpeed)));
