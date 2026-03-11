@@ -2,6 +2,7 @@ package frc.robot.subsystems.Vision;
 
 import static frc.robot.Constants.VisionConstants.*;
 
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
@@ -148,6 +149,34 @@ public class ReadAprilTag {
     public PhotonCamera         getCamera()       { return m_camera;       }
     public String               getName()         { return m_camera.getName(); }
     public PhotonPipelineResult getLatestResult() { return m_latestResult; }
+
+    /**
+     * All 3D robot pose estimates from the last {@link #update()} call, as a
+     * {@code Pose3d[]} array ready for AdvantageScope 3D field visualization.
+     */
+    public Pose3d[] getNewEstimatedPoses3d() {
+        Pose3d[] poses = new Pose3d[m_newEstimates.size()];
+        for (int i = 0; i < m_newEstimates.size(); i++) {
+            poses[i] = m_newEstimates.get(i).estimatedPose;
+        }
+        return poses;
+    }
+
+    /**
+     * Camera-to-tag transforms for every target in the latest pipeline result.
+     * Useful for visualizing each detected tag's position relative to the camera
+     * in AdvantageScope's 3D view.
+     * Returns an empty array when no targets are visible.
+     */
+    public Transform3d[] getCameraToTagTransforms() {
+        if (m_latestResult == null || !m_latestResult.hasTargets()) return new Transform3d[0];
+        var targets = m_latestResult.getTargets();
+        Transform3d[] transforms = new Transform3d[targets.size()];
+        for (int i = 0; i < targets.size(); i++) {
+            transforms[i] = targets.get(i).getBestCameraToTarget();
+        }
+        return transforms;
+    }
 
     // ── Telemetry ─────────────────────────────────────────────────────────────
 

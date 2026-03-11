@@ -17,6 +17,7 @@ import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Shooter.ShotCalculator;
 import frc.robot.subsystems.Shooter.VelocityCompensator;
+import frc.robot.subsystems.Vision.VisionSubsystem;
 
 public class DriveToHubAndShootCommand extends Command {
 
@@ -55,6 +56,7 @@ public class DriveToHubAndShootCommand extends Command {
     // ── Dependencies ──────────────────────────────────────────────────────────
     private final CommandSwerveDrivetrain m_drivetrain;
     private final ShooterSubsystem        m_shooter;
+    private final VisionSubsystem         m_vision;
     private final HubAlignController      m_alignCtrl = new HubAlignController();
 
     // ── Per-run state ─────────────────────────────────────────────────────────
@@ -69,9 +71,11 @@ public class DriveToHubAndShootCommand extends Command {
     // ── Constructor ───────────────────────────────────────────────────────────
     public DriveToHubAndShootCommand(
             CommandSwerveDrivetrain drivetrain,
-            ShooterSubsystem shooter) {
+            ShooterSubsystem shooter,
+            VisionSubsystem vision) {
         m_drivetrain = drivetrain;
         m_shooter    = shooter;
+        m_vision     = vision;
         addRequirements(drivetrain, shooter);
     }
 
@@ -106,6 +110,9 @@ public class DriveToHubAndShootCommand extends Command {
 
         m_alignCtrl.reset();
 
+        // Pause vision Kalman injection so pose resets don't jerk the PID mid-drive
+        m_vision.setVisionEnabled(false);
+
         // 1323: pre-spin flywheel immediately so robot arrives already at speed
         m_shooter.setFlywheelRPM(ShooterConstants.IDLE_RPM);
 
@@ -126,11 +133,12 @@ public class DriveToHubAndShootCommand extends Command {
         double headingRad    = robotPose.getRotation().getRadians();
         double shooterX      = robotPose.getX() + ShooterConstants.SHOOTER_X_OFFSET_METERS * Math.cos(headingRad);
         double shooterY      = robotPose.getY() + ShooterConstants.SHOOTER_X_OFFSET_METERS * Math.sin(headingRad);
-        double distToHub     = new Translation2d(shooterX, shooterY).getDistance(HUB);
+        Translation2d alignTarget = getAlignTarget();
+        double distToHub     = new Translation2d(shooterX, shooterY).getDistance(alignTarget);
 
         // Velocity-compensated virtual distance
         var comp = VelocityCompensator.getInstance().compensate(
-            new Translation2d(shooterX, shooterY), HUB,
+            new Translation2d(shooterX, shooterY), alignTarget,
             speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
 
         ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
@@ -141,9 +149,9 @@ public class DriveToHubAndShootCommand extends Command {
         m_shooter.setFlywheelRPM(m_targetRPM);
         m_shooter.setLaunchAngleDeg(m_targetHoodDeg);
 
-        // Rotation output from HubAlignController (ProfiledPID toward hub)
+        // Rotation output from HubAlignController (ProfiledPID toward tag/hub)
         HubAlignController.DriveOutput alignOut =
-            m_alignCtrl.compute(m_drivetrain, HUB, ShotCalculator.OPTIMAL_STANDOFF_M);
+            m_alignCtrl.compute(m_drivetrain, alignTarget, ShotCalculator.OPTIMAL_STANDOFF_M);
 
         boolean inZone = distToHub >= ZONE_MIN_M && distToHub <= ZONE_MAX_M;
 
@@ -207,10 +215,10 @@ public class DriveToHubAndShootCommand extends Command {
                         || distToHub > ZONE_MAX_M + DRIFT_THRESHOLD_M) {
                     // Recompute target pose from current position
                     double bearingRad = Math.atan2(
-                        robotPose.getY() - HUB.getY(),
-                        robotPose.getX() - HUB.getX());
-                    m_xController.setGoal(HUB.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad));
-                    m_yController.setGoal(HUB.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad));
+                        robotPose.getY() - alignTarget.getY(),
+                        robotPose.getX() - alignTarget.getX());
+                    m_xController.setGoal(alignTarget.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad));
+                    m_yController.setGoal(alignTarget.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad));
                     m_state = State.DRIVING;
                     m_allGreenStartS = Double.NaN;
                 }
@@ -253,12 +261,17 @@ public class DriveToHubAndShootCommand extends Command {
 
     @Override
     public void end(boolean interrupted) {
+        m_vision.setVisionEnabled(true);
         m_drivetrain.setControl(new SwerveRequest.Idle());
         m_shooter.idleFlywheel();
         SmartDashboard.putString("DTHS2/State", interrupted ? "INTERRUPTED" : "COMPLETE");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Translation2d getAlignTarget() {
+        return HUB;
+    }
 
     private boolean isHubConfirmedActive() {
         if (!DriverStation.isFMSAttached()) return true;

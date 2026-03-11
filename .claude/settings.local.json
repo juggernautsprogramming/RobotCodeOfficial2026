@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(JAVA_HOME=\"C:/Users/Admin/wpilib/2026/jdk\" ./gradlew compileJava)",
+      "Bash(JAVA_HOME=\"/c/Users/Admin/wpilib/2026/jdk\" ./gradlew compileJava)"
+    ]
+  }
+}

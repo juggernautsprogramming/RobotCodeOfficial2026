@@ -24,6 +24,7 @@ import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import frc.robot.Constants.VisionConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 
@@ -220,7 +221,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             });
         }
 
-        Pose3d robotPose3d = new Pose3d(getState().Pose);
+        Pose2d robotPose   = getState().Pose;
+        Pose3d robotPose3d = new Pose3d(robotPose);
         Logger.recordOutput("Drive/RobotPose3d", robotPose3d);
         Logger.recordOutput("Vision/CameraPoses", new Pose3d[] {
             robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_BACK_LEFT)),
@@ -228,8 +230,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         });
         // ✅ Raw odometry only (no vision influence) — wheel encoders + gyro
         Logger.recordOutput("Drive/OdometryPose", getState().RawHeading != null
-            ? new Pose2d(getState().Pose.getTranslation(), getState().RawHeading)
-            : getState().Pose);
+            ? new Pose2d(robotPose.getTranslation(), getState().RawHeading)
+            : robotPose);
+
+        // ── AdvantageScope display-friendly poses ─────────────────────────────
+        // If the field appears reversed in AdvantageScope (forward=backward,
+        // left=right), use these Display/* keys instead of Drive/RobotPose3d.
+        // They are the actual poses rotated 180° around the field centre so the
+        // robot tracks correctly on AdvantageScope's field image.
+        double fx = VisionConstants.FIELD_LENGTH_M - robotPose.getX();
+        double fy = VisionConstants.FIELD_WIDTH_M  - robotPose.getY();
+        Rotation2d fRot = robotPose.getRotation().rotateBy(Rotation2d.k180deg);
+        Pose2d displayPose = new Pose2d(fx, fy, fRot);
+        Logger.recordOutput("Display/RobotPose2d", displayPose);
+        Logger.recordOutput("Display/RobotPose3d", new Pose3d(displayPose));
     }
     private void startSimThread() {
         m_lastSimTime = Utils.getCurrentTimeSeconds();
@@ -244,6 +258,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             updateSimState(deltaTime, RobotController.getBatteryVoltage());
         });
         m_simNotifier.startPeriodic(kSimLoopPeriod);
+    }
+
+    /**
+     * Resets the full pose estimate (XY + heading) to the given pose.
+     * Use this when vision provides a high-confidence fix that is far from the
+     * current odometry estimate — e.g. at startup before the first tag lock.
+     *
+     * @param pose The field-relative pose to reset to.
+     */
+    public void resetPose(Pose2d pose) {
+        super.resetPose(pose);
     }
 
     /**

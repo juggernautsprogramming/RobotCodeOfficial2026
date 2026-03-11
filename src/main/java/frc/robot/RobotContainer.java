@@ -120,11 +120,11 @@ public class RobotContainer {
             )
         );
 
-        // ── Right Bumper: Snap heading to nearest visible AprilTag ───────────
-        // Press once → robot rotates to face whatever tag is visible right now.
-        // Driver keeps full X/Y translation control during the snap.
-        // Finishes automatically when within ±1° for 0.1 s.
-        m_driverStick.rightBumper().onTrue(
+        // ── Right Bumper: Continuous heading alignment to best visible AprilTag ─
+        // Hold → robot continuously faces whatever tag is visible.
+        // Driver keeps full X/Y translation control.
+        // Releases when button is released; holds last known heading if tag lost.
+        m_driverStick.rightBumper().whileTrue(
             new SnapHeadingToTag(
                 drivetrain,
                 visionSubsystem,
@@ -137,12 +137,11 @@ public class RobotContainer {
         // ProfiledPIDController locks rotation onto the hub while the driver
         // steers with the left joystick. Dashboard "DTHS/Aligned" lights up
         // when angular error < 1.5° and the hub is confirmed active.
-        // Shooting is disabled in this test mode (see DriveToHubAndShootCommand).
-        // ✅ FIXED — matches the updated 2-argument constructor
         m_driverStick.b().toggleOnTrue(
             new DriveToHubAndShootCommand(
                 drivetrain,
-                shooterSubsystem)
+                shooterSubsystem,
+                visionSubsystem)
         );
 
         // ── Left Bumper: Gyro reset ───────────────────────────────────────────

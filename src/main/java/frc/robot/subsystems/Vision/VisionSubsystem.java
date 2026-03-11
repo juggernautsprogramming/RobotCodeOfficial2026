@@ -15,6 +15,7 @@ import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -49,8 +50,9 @@ import frc.robot.subsystems.CommandSwerveDrivetrain;
  *   tagFactor   = MULTI_TAG_FACTOR (< 1)  if tagCount ≥ 2, else 1.0
  *   ambiguity   = 1.0 + ambiguity × (AMBIGUITY_SCALE − 1)   range [1, AMBIGUITY_SCALE]
  *
- *   rotStdDev   = 5°   when tagCount ≥ 2 AND robot speed < SPEED_THRESHOLD
- *               = 9999 in all other cases (gyro is trusted instead)
+ *   rotStdDev   = 12°  when tagCount ≥ 2  (multi-tag: gentle heading nudge)
+ *               = 30°  when tagCount = 1  (single-tag: weaker heading nudge)
+ *   Gyro/odometry always dominates rotation; vision prevents long-term drift.
  * </pre>
  *
  * <h3>Sanity filter</h3>
@@ -63,29 +65,41 @@ import frc.robot.subsystems.CommandSwerveDrivetrain;
  *
  * <h3>AdvantageScope keys</h3>
  * <pre>
- *   Drive/RobotPose3d           — fused 3-D robot pose (for 3D field view)
- *   Drive/VisionPose            — latest accepted vision pose (ghost robot)
- *   Vision/DetectedTags3d       — 3D field poses of all currently visible tags
- *   Vision/LayoutTags3d         — all tag poses from the loaded layout (reference)
- *   Vision/AcceptedPoses        — all poses injected into Kalman this loop
- *   Vision/VisionEnabled        — whether Kalman injection is active
- *   Vision/Rejected/Stale       — frames dropped for being too old
- *   Vision/Rejected/OutOfBounds — frames dropped for impossible field position
- *   Vision/Rejected/Teleport    — frames dropped for large pose jump
- *   Vision/{camera}/XY_StdDev  — per-camera trust applied this loop
- *   Vision/{camera}/TagCount    — tags used in the accepted estimate
- *   Vision/{camera}/Distance_m  — average camera-to-tag distance
- *   Vision/{camera}/Ambiguity   — best-target pose ambiguity ratio
- *   Vision/{camera}/JumpDist_m  — translation delta vs current odometry
+ *   Drive/RobotPose3d                  — Kalman-fused 3D pose (logged by CommandSwerveDrivetrain)
+ *   Drive/VisionPose                   — latest accepted vision pose 2D (ghost robot)
+ *   Vision/AcceptedPoses               — all Kalman-injected poses this loop (Pose2d[])
+ *   Vision/AcceptedPoses3d             — same as AcceptedPoses as Pose3d[] for 3D field view
+ *   Vision/DetectedTags3d              — 3D field poses of all currently visible tags
+ *   Vision/LayoutTags3d                — all tag poses from the loaded layout (reference)
+ *   Vision/VisionEnabled               — whether Kalman injection is active
+ *   Vision/Rejected/Stale              — frames dropped for being too old
+ *   Vision/Rejected/OutOfBounds        — frames dropped for impossible field position
+ *   Vision/Rejected/Teleport           — frames dropped for large pose jump
+ *   Vision/{camera}/XY_StdDev         — per-camera trust applied this loop
+ *   Vision/{camera}/TagCount           — tags used in the accepted estimate
+ *   Vision/{camera}/Distance_m         — average camera-to-tag distance
+ *   Vision/{camera}/Ambiguity          — best-target pose ambiguity ratio
+ *   Vision/{camera}/JumpDist_m         — translation delta vs current odometry
+ *   Vision/{camera}/EstimatedPoses3d          — all 3D pose estimates from this camera this loop
+ *   Vision/{camera}/CamToTagTransforms        — camera-to-tag Transform3d for each detected tag
+ *   Vision/ConsensusPose                      — weighted average of odometry + all vision estimates (Pose2d)
+ *   Vision/ConsensusPose3d                    — same as above as Pose3d for 3D field view
+ *   Vision/SourceWeights/OdometryFraction     — fraction [0-1] of total weight from odometry
+ *   Vision/SourceWeights/VisionFraction       — fraction [0-1] of total weight from vision
+ *   Vision/SourceWeights/VisionEstimateCount  — number of vision estimates this loop
  * </pre>
  */
 public class VisionSubsystem extends SubsystemBase {
 
     // ── Sanity filter ─────────────────────────────────────────────────────────
 
-    /** 2026 Reefscape field dimensions (metres). */
-    private static final double FIELD_LENGTH_M = 17.548;
-    private static final double FIELD_WIDTH_M  =  8.052;
+    /**
+     * Field dimensions pulled from the loaded AprilTag layout (metres).
+     * Automatically matches whatever field JSON is deployed (custom hub, full field, etc.)
+     * so the out-of-bounds rejection always matches the actual playing field.
+     */
+    private static final double FIELD_LENGTH_M = VisionConstants.kTagLayout.getFieldLength();
+    private static final double FIELD_WIDTH_M  = VisionConstants.kTagLayout.getFieldWidth();
 
     /**
      * Tolerance outside the field boundary where a pose is still accepted (metres).
@@ -124,21 +138,19 @@ public class VisionSubsystem extends SubsystemBase {
     private static final double AMBIGUITY_SCALE  = 4.0;
 
     /**
-     * Rotation std-dev (radians) used when vision heading is trusted.
-     * Only applies to multi-tag + slow-robot scenarios.
+     * Rotation std-dev (radians) for multi-tag pose estimates.
+     * Lower value = vision heading is trusted more.  Odometry/gyro still dominates
+     * because WPILib's default gyro noise is ~0.01 rad (~0.6°), but this lets
+     * vision nudge heading slightly when two or more tags agree on the angle.
      */
-    private static final double ROT_STDDEV_TRUSTED_RAD = Units.degreesToRadians(5.0);
+    private static final double ROT_STDDEV_MULTI_TAG_RAD  = Units.degreesToRadians(12.0);
 
     /**
-     * Rotation std-dev sentinel that effectively disables heading fusion.
-     * The gyro is almost always more accurate for heading.
+     * Rotation std-dev (radians) for single-tag pose estimates.
+     * Higher than multi-tag because a single-tag heading is less reliable.
+     * Still contributes a small influence so heading doesn't drift completely.
      */
-    private static final double ROT_STDDEV_IGNORE_RAD  = 9999.0;
-
-    /**
-     * Robot translational speed below which vision rotation is trusted (m/s).
-     */
-    private static final double SPEED_TRUST_THRESHOLD_MPS = 0.3;
+    private static final double ROT_STDDEV_SINGLE_TAG_RAD = Units.degreesToRadians(30.0);
 
     // ── Logging ───────────────────────────────────────────────────────────────
 
@@ -183,6 +195,22 @@ public class VisionSubsystem extends SubsystemBase {
      */
     private volatile boolean m_visionEnabled = true;
 
+    /**
+     * Most recent weighted consensus pose — a manual weighted average of odometry
+     * and all accepted vision estimates this loop.  Logged as
+     * {@code Vision/ConsensusPose} and {@code Vision/ConsensusPose3d}.
+     * Null until the first loop completes.
+     */
+    private Pose2d m_consensusPose = null;
+
+    /**
+     * Std-dev used for the odometry source in the consensus XY calculation (metres).
+     * Raised so cameras (XY_BASE_STDDEV ≈ 0.05 m) dominate the XY consensus pose
+     * whenever at least one tag is visible.  Odometry still wins for rotation
+     * through the Kalman filter's gyro model.
+     */
+    private static final double ODOMETRY_STDDEV_M = 0.25;
+
     /** PID for raw yaw-alignment commands (used by AlignToTag). */
     private final PIDController m_alignPID;
 
@@ -222,9 +250,10 @@ public class VisionSubsystem extends SubsystemBase {
         }
 
         // ── Per-loop AdvantageScope accumulators ──────────────────────────────
-        List<Pose3d> detectedTags3d = new ArrayList<>();
-        List<Pose2d> acceptedPoses  = new ArrayList<>();
-        Set<Integer> seenTagIds     = new HashSet<>();
+        List<Pose3d> detectedTags3d  = new ArrayList<>();
+        List<Pose2d> acceptedPoses   = new ArrayList<>();
+        List<Double> acceptedStdDevs = new ArrayList<>(); // parallel to acceptedPoses
+        Set<Integer> seenTagIds      = new HashSet<>();
         int rejStale = 0, rejOutOfBounds = 0, rejTeleport = 0;
 
         // Reset per-loop target state
@@ -234,11 +263,6 @@ public class VisionSubsystem extends SubsystemBase {
 
         Pose2d robotPose = m_drivetrain.getState().Pose;
         double now       = RobotController.getFPGATime() * 1e-6; // µs → s
-
-        var    chassisSpeeds = m_drivetrain.getState().Speeds;
-        double speed = Math.hypot(
-            chassisSpeeds.vxMetersPerSecond,
-            chassisSpeeds.vyMetersPerSecond);
 
         for (ReadAprilTag sensor : m_sensors) {
 
@@ -259,16 +283,31 @@ public class VisionSubsystem extends SubsystemBase {
                 // (b) Field boundaries: robot cannot be outside the field
                 if (!isWithinField(estPose)) { rejOutOfBounds++; continue; }
 
-                // (c) Teleportation: reject if pose jumped too far from odometry
-                double jumpDist = estPose.getTranslation()
-                    .getDistance(robotPose.getTranslation());
-                if (jumpDist > MAX_POSE_JUMP_M) { rejTeleport++; continue; }
-
-                // ── Dynamic Trust Factor ──────────────────────────────────────
-
+                // ── Tag metrics (needed for jump handling AND trust model) ─────
                 int    tagCount  = estimate.targetsUsed.size();
                 double dist      = sensor.getAverageDistanceToTags();
                 double ambiguity = sensor.getAmbiguity();
+
+                // (c) Large pose jump handling
+                // Normal Kalman updates can't bridge a multi-metre gap (e.g. robot
+                // starts at 0,0 but the tags say it's at 2,3).  If the fix is
+                // reasonable confidence (low ambiguity) we RESET the pose so
+                // odometry immediately starts from the correct field position.
+                // High-ambiguity large jumps are still rejected to guard against
+                // bad single-tag solves corrupting the estimator.
+                double jumpDist = estPose.getTranslation()
+                    .getDistance(robotPose.getTranslation());
+                if (jumpDist > MAX_POSE_JUMP_M) {
+                    if (ambiguity < 0.3 && m_visionEnabled) {
+                        m_drivetrain.resetPose(estPose);
+                        robotPose = estPose; // update local ref so rest of loop uses new pose
+                        Logger.recordOutput("Vision/PoseReset", true);
+                    } else {
+                        rejTeleport++;
+                    }
+                    continue; // don't also add as vision measurement after reset
+                }
+                Logger.recordOutput("Vision/PoseReset", false);
 
                 // Base XY std-dev scales quadratically with range
                 double xyStdDev = XY_BASE_STDDEV + dist * dist * XY_DIST_COEFF;
@@ -279,10 +318,13 @@ public class VisionSubsystem extends SubsystemBase {
                 // Ambiguity penalty: linearly scale up std-dev for higher ambiguity
                 xyStdDev *= (1.0 + ambiguity * (AMBIGUITY_SCALE - 1.0));
 
-                // Rotation: only trust heading for multi-tag + near-stationary robot
-                double rotStdDev = (tagCount >= 2 && speed < SPEED_TRUST_THRESHOLD_MPS)
-                    ? ROT_STDDEV_TRUSTED_RAD
-                    : ROT_STDDEV_IGNORE_RAD;
+                // Rotation: odometry/gyro is primary, but vision heading always
+                // contributes a small amount.  Multi-tag gives a tighter constraint
+                // (12°) than single-tag (30°).  Gyro drift is ~0.6° so it wins, but
+                // vision prevents long-term heading creep.
+                double rotStdDev = (tagCount >= 2)
+                    ? ROT_STDDEV_MULTI_TAG_RAD
+                    : ROT_STDDEV_SINGLE_TAG_RAD;
 
                 // ── Feed to Kalman filter at the historical timestamp ──────────
                 // Skipped when vision is paused (e.g. DriveToPose is active) so
@@ -296,8 +338,9 @@ public class VisionSubsystem extends SubsystemBase {
                     timestamp,
                     VecBuilder.fill(xyStdDev, xyStdDev, rotStdDev));
 
-                // Track for ghost pose display and AdvantageScope
+                // Track for ghost pose display, consensus calc, and AdvantageScope
                 acceptedPoses.add(estPose);
+                acceptedStdDevs.add(xyStdDev);
                 if (m_lastVisionPose == null || timestamp > m_lastVisionTimeS) {
                     m_lastVisionPose  = estPose;
                     m_lastVisionTimeS = now;
@@ -313,6 +356,17 @@ public class VisionSubsystem extends SubsystemBase {
                 Logger.recordOutput(logPrefix + "Ambiguity",  ambiguity);
                 Logger.recordOutput(logPrefix + "JumpDist_m", jumpDist);
             }
+
+            // Per-camera 3D estimated poses — for AdvantageScope 3D field view.
+            // Shows exactly what each camera thinks the robot's pose is.
+            Logger.recordOutput(
+                "Vision/" + sensor.getName() + "/EstimatedPoses3d",
+                sensor.getNewEstimatedPoses3d());
+
+            // Camera-to-tag transforms — visualize tag detections in 3D.
+            Logger.recordOutput(
+                "Vision/" + sensor.getName() + "/CamToTagTransforms",
+                sensor.getCameraToTagTransforms());
 
             // Step 3 — track best targets + collect detected tag 3D poses
             var result = sensor.getLatestResult();
@@ -353,10 +407,61 @@ public class VisionSubsystem extends SubsystemBase {
                 Units.degreesToRadians(m_bestHubTarget.getPitch()));
         }
 
+        // ── Multi-source weighted consensus pose ──────────────────────────────
+        // Combines odometry + every accepted vision estimate into a single
+        // manually-averaged pose.  Weight = 1/σ² so lower std-dev = more pull.
+        //
+        // This is NOT fed to the Kalman filter — it is a transparency/debug signal
+        // so you can see in AdvantageScope how much each source is contributing vs
+        // what the Kalman filter (Drive/RobotPose3d) actually decided.
+        {
+            double sumW    = 0.0;
+            double sumWx   = 0.0, sumWy   = 0.0;
+            double sumWSin = 0.0, sumWCos = 0.0;
+
+            // Odometry contribution
+            double odomW = 1.0 / (ODOMETRY_STDDEV_M * ODOMETRY_STDDEV_M);
+            sumW    += odomW;
+            sumWx   += odomW * robotPose.getX();
+            sumWy   += odomW * robotPose.getY();
+            sumWSin += odomW * Math.sin(robotPose.getRotation().getRadians());
+            sumWCos += odomW * Math.cos(robotPose.getRotation().getRadians());
+
+            // Vision estimates contribution
+            double visionTotalW = 0.0;
+            for (int i = 0; i < acceptedPoses.size(); i++) {
+                double w = 1.0 / (acceptedStdDevs.get(i) * acceptedStdDevs.get(i));
+                Pose2d p = acceptedPoses.get(i);
+                sumW    += w;
+                sumWx   += w * p.getX();
+                sumWy   += w * p.getY();
+                sumWSin += w * Math.sin(p.getRotation().getRadians());
+                sumWCos += w * Math.cos(p.getRotation().getRadians());
+                visionTotalW += w;
+            }
+
+            // Compute the weighted average
+            double avgX     = sumWx / sumW;
+            double avgY     = sumWy / sumW;
+            double avgTheta = Math.atan2(sumWSin / sumW, sumWCos / sumW);
+            m_consensusPose = new Pose2d(avgX, avgY, new Rotation2d(avgTheta));
+
+            Logger.recordOutput("Vision/ConsensusPose",   m_consensusPose);
+            Logger.recordOutput("Vision/ConsensusPose3d", new Pose3d(m_consensusPose));
+
+            // Source-weight fractions [0-1] — tells you how much each source is
+            // pulling the consensus.  OdometryFraction + VisionFraction = 1.0.
+            Logger.recordOutput("Vision/SourceWeights/OdometryFraction",
+                sumW > 0 ? odomW / sumW : 1.0);
+            Logger.recordOutput("Vision/SourceWeights/VisionFraction",
+                sumW > 0 ? visionTotalW / sumW : 0.0);
+            Logger.recordOutput("Vision/SourceWeights/VisionEstimateCount",
+                (double) acceptedPoses.size());
+        }
+
         // ── AdvantageScope bulk logging ───────────────────────────────────────
 
-        // Robot pose in 3D for the AdvantageScope 3D field view
-        Logger.recordOutput("Drive/RobotPose3d", new Pose3d(m_drivetrain.getState().Pose));
+        // NOTE: Drive/RobotPose3d is logged by CommandSwerveDrivetrain — not duplicated here.
 
         // Vision ghost: parks off-field when stale or absent
         if (m_lastVisionPose != null && (now - m_lastVisionTimeS) < GHOST_FADE_S) {
@@ -372,9 +477,19 @@ public class VisionSubsystem extends SubsystemBase {
         // All tag poses from the loaded layout (reference overlay in 3D view)
         Logger.recordOutput("Vision/LayoutTags3d", m_layoutTags3d);
 
-        // All vision poses accepted into the Kalman filter this loop
+        // All vision poses accepted into the Kalman filter this loop — 2D
         Logger.recordOutput("Vision/AcceptedPoses",
             acceptedPoses.toArray(new Pose2d[0]));
+
+        // Same accepted poses as Pose3d[] for the AdvantageScope 3D field view.
+        // Lets you see ghost robots at each raw camera estimate vs the fused pose.
+        Pose3d[] acceptedPoses3d = new Pose3d[acceptedPoses.size()];
+        for (int i = 0; i < acceptedPoses.size(); i++) {
+            acceptedPoses3d[i] = new Pose3d(acceptedPoses.get(i).getX(),
+                acceptedPoses.get(i).getY(), 0.0,
+                new Rotation3d(0, 0, acceptedPoses.get(i).getRotation().getRadians()));
+        }
+        Logger.recordOutput("Vision/AcceptedPoses3d", acceptedPoses3d);
 
         // Vision pause gate state (true = Kalman corrections active)
         Logger.recordOutput("Vision/VisionEnabled", m_visionEnabled);
@@ -462,6 +577,14 @@ public class VisionSubsystem extends SubsystemBase {
     /** Field2d displaying individual camera raw pose ghosts. */
     public Field2d getFieldCameras() { return m_fieldCameras; }
 
+    /**
+     * Most recent weighted consensus pose — a manual weighted average of odometry
+     * and all accepted vision estimates from the last periodic() loop.
+     * Returns {@code null} before the first loop completes.
+     * Logged as {@code Vision/ConsensusPose} and {@code Vision/ConsensusPose3d}.
+     */
+    public Pose2d getConsensusPose() { return m_consensusPose; }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -484,11 +607,10 @@ public class VisionSubsystem extends SubsystemBase {
 
     /** Called once after the DriverStation alliance is known. */
     private void updateAllianceOrigin() {
-        DriverStation.getAlliance().ifPresent(alliance ->
-            VisionConstants.kTagLayout.setOrigin(
-                alliance == DriverStation.Alliance.Red
-                    ? edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kRedAllianceWallRightSide
-                    : edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kBlueAllianceWallRightSide));
+        // Custom hub layout uses absolute coordinates — do NOT flip by alliance.
+        // Alliance origin flipping is only correct for the full FRC field layout.
+        VisionConstants.kTagLayout.setOrigin(
+            edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kBlueAllianceWallRightSide);
 
         // Cache 3D poses of all tags in the layout — logged every loop so late-joining
         // AdvantageScope instances always see the reference overlay.

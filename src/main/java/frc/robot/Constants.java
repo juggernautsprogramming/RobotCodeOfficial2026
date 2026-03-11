@@ -111,11 +111,11 @@ public final class Constants {
                         kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
             }
         }
-        // ── 2026 Reefscape field dimensions ──────────────────────────────────
+        // ── 2026 Rebuilt (AndyMark) custom hub field dimensions ───────────────
         /** Full field length — from blue wall to red wall (metres). */
-        public static final double FIELD_LENGTH_M = 17.548;
+        public static final double FIELD_LENGTH_M = 8.0;
         /** Full field width (metres). */
-        public static final double FIELD_WIDTH_M  =  8.052;
+        public static final double FIELD_WIDTH_M  = 8.052;
 
         /**
          * Maximum pose ambiguity ratio accepted from a single-tag solve.
@@ -199,10 +199,12 @@ public final class Constants {
 
         // ── Field / Hub geometry ──────────────────────────────────────────────
         /**
-         * Hub center position on the field (meters, field-relative blue-origin).
-         * Update once the official 2026 field drawing is released.
+         * Hub center position on the custom 8 m × 8.052 m field (metres).
+         * Derived from the four hub AprilTag positions in custom_hub.json:
+         *   Tag 19: (4.0,    4.026), Tag 9: (5.1938, 4.026)  ← X midpoint = 4.5969
+         *   Tag 8:  (4.5969, 4.6229), Tag 11: (4.5969, 3.4291) ← Y midpoint = 4.026
          */
-        public static final Translation2d HUB_CENTER = new Translation2d(8.270, 4.105);
+        public static final Translation2d HUB_CENTER = new Translation2d(4.5969, 4.026);
 
         /**
          * Height of the hub opening (top of target) above the floor (meters).
