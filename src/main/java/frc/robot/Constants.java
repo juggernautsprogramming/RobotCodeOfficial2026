@@ -46,7 +46,8 @@ public final class Constants {
             new Translation2d( Units.inchesToMeters(-10), Units.inchesToMeters(-10))
         );
 
-        private AutoConstants() {}
+        private AutoConstants() {
+        }
     }
 
     // =========================================================================
@@ -91,7 +92,39 @@ public final class Constants {
 
         private VisionHardware() {}
     }
+// =========================================================================
+// AUTONOMOUS STARTING POSITIONS
+// =========================================================================
+public static final class AutoStartConstants {
 
+    /** Left start — robot centre on the hub line, facing hub */
+    public static final double LEFT_START_X   = 2.0;
+    public static final double LEFT_START_Y   = 6.5;
+    public static final double LEFT_START_HDG = -30.0; // degrees
+
+    /** Center start — directly in front of hub */
+    public static final double CENTER_START_X   = 2.0;
+    public static final double CENTER_START_Y   = 4.026; // matches HUB_CENTER.y
+    public static final double CENTER_START_HDG = 0.0;
+
+    /** Right start — right side of hub line */
+    public static final double RIGHT_START_X   = 2.0;
+    public static final double RIGHT_START_Y   = 1.7;
+    public static final double RIGHT_START_HDG = 30.0;
+
+    /** Balls to shoot from preload (first shot zone) */
+    public static final int PRELOAD_BALL_COUNT = 3;
+    /** Balls picked up from the field */
+    public static final int PICKUP_BALL_COUNT  = 5;
+    /** Hard safety timeout for the entire auto sequence */
+    public static final double AUTO_TIMEOUT_S  = 15.0;
+    // PathPlanner auto constraints
+    public static final double AUTO_MAX_VEL       = 2.0;   // m/s
+    public static final double AUTO_MAX_ACCEL     = 2.5;   // m/s²
+    public static final double AUTO_MAX_ANG_VEL   = 360.0; // deg/s
+    public static final double AUTO_MAX_ANG_ACCEL = 720.0; // deg/s²
+    private AutoStartConstants() {}
+}
     // =========================================================================
     // VISION — algorithm constants
     // =========================================================================
