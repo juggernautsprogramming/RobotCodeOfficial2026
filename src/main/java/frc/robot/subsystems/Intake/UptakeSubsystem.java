@@ -1,5 +1,6 @@
 package frc.robot.subsystems.Intake;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
@@ -11,11 +12,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 /**
- * UptakeSubsystem — intake uptake roller.
- *
- * <h3>Deprecation fix</h3>
- * Replaced {@code new TalonFX(id, "ChassisCAN")} with
- * {@code new TalonFX(id, new CANBus("ChassisCAN"))}.
+ * UptakeSubsystem — intake uptake roller (CAN ID 42, ChassisCAN bus).
  */
 public class UptakeSubsystem extends SubsystemBase {
 
@@ -29,8 +26,8 @@ public class UptakeSubsystem extends SubsystemBase {
     private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0);
 
     public UptakeSubsystem() {
-        // FIX: use CANBus object instead of deprecated TalonFX(int, String)
-        uptakeMotor = new TalonFX(LEADER_ID, new String(CAN_BUS));
+        // FIX: new CANBus(CAN_BUS) — not new String(CAN_BUS)
+        uptakeMotor = new TalonFX(LEADER_ID, new CANBus(CAN_BUS));
 
         TalonFXConfiguration config = new TalonFXConfiguration();
         config.MotorOutput.Inverted    = InvertedValue.CounterClockwise_Positive;
@@ -67,7 +64,9 @@ public class UptakeSubsystem extends SubsystemBase {
         uptakeMotor.setControl(motionMagicRequest.withPosition(targetRotations));
     }
 
-    public void stopMotors() { uptakeMotor.stopMotor(); }
+    public void stopMotors() {
+        uptakeMotor.stopMotor();
+    }
 
     @Override
     public void periodic() {}

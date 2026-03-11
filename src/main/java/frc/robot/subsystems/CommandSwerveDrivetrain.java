@@ -270,7 +270,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     public void resetPose(Pose2d pose) {
         super.resetPose(pose);
     }
-
+ 
+    public void driveRobotRelative(edu.wpi.first.math.kinematics.ChassisSpeeds speeds) {
+        setControl(new com.ctre.phoenix6.swerve.SwerveRequest.RobotCentric()
+            .withVelocityX(speeds.vxMetersPerSecond)
+            .withVelocityY(speeds.vyMetersPerSecond)
+            .withRotationalRate(speeds.omegaRadiansPerSecond));
+    }
     /**
      * Adds a vision measurement to the Kalman Filter. Converts PhotonVision FPGA
      * timestamps to the current-time domain used by the pose estimator.
