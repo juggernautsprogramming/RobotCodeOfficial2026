@@ -2,53 +2,40 @@ package frc.robot.commands;
 
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
-import edu.wpi.first.math.controller.HolonomicDriveController;
-import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
-import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
 /**
- * TurnToAngle — rotates the robot to an absolute or relative heading.
+ * TurnToAngle — rotates the robot to an absolute or relative heading in place.
  *
- * <h3>Fixes applied</h3>
- * <ul>
- *   <li>Removed the erroneous {@code resetPose()} call from {@code initialize()} that was
- *       zeroing the robot's heading and corrupting odometry before computing the target.</li>
- *   <li>Added {@code enableContinuousInput(-Math.PI, Math.PI)} on the theta controller so
- *       the profiled PID always takes the shortest arc through zero (prevents 350° wrong-way
- *       spins).</li>
- *   <li>Tightened X/Y tolerance from 1 m → 0.05 m so {@code atReference()} triggers
- *       reliably on rotation alone without needing a large translational error.</li>
- *   <li>Added a 3-second safety timeout in {@code isFinished()} to prevent infinite spin if
- *       the controller never converges (e.g. blocked wheel, bad gains).</li>
- *   <li>Added SmartDashboard telemetry for heading error and timeout.</li>
- * </ul>
+ * Translation is zero throughout; only the heading is controlled.
+ * Uses a ProfiledPIDController + FieldCentric request (same pattern as SnapHeadingToTag).
  */
 public class TurnToAngle extends Command {
 
-    // ── Safety timeout ─────────────────────────────────────────────────────────
-    private static final double TIMEOUT_SECONDS = 3.0;
+    private static final double TIMEOUT_SECONDS       = 3.0;
+    private static final double TOLERANCE_DEG         = 1.0;
+    private static final double MAX_OMEGA_RAD_S       = Math.toRadians(360);
+    private static final double MAX_ALPHA_RAD_S2      = Math.toRadians(720);
 
-    // ── Dependencies ───────────────────────────────────────────────────────────
-    private final CommandSwerveDrivetrain m_swerve;
+    private final CommandSwerveDrivetrain     m_swerve;
+    private final double                      m_goalDeg;
+    private final boolean                     m_isRelative;
 
-    // ── Config ─────────────────────────────────────────────────────────────────
-    private final double  m_goalDeg;
-    private final boolean m_isRelative;
+    private final ProfiledPIDController       m_thetaController;
+    private final SwerveRequest.FieldCentric  m_driveRequest = new SwerveRequest.FieldCentric();
 
-    // ── Controller ─────────────────────────────────────────────────────────────
-    private final HolonomicDriveController m_controller;
-
-    // ── State ──────────────────────────────────────────────────────────────────
-    private Pose2d m_targetPose  = new Pose2d();
-    private double m_startTimeS  = 0.0;
+    private Rotation2d m_targetRotation;
+    private double     m_startTimeS;
 
     /**
      * @param swerve     Swerve subsystem.
@@ -57,81 +44,70 @@ public class TurnToAngle extends Command {
      *                   {@code false} = absolute field heading.
      */
     public TurnToAngle(CommandSwerveDrivetrain swerve, double angle, boolean isRelative) {
-        this.m_swerve     = swerve;
-        this.m_goalDeg    = angle;
-        this.m_isRelative = isRelative;
+        m_swerve     = swerve;
+        m_goalDeg    = angle;
+        m_isRelative = isRelative;
         addRequirements(swerve);
 
-        PIDController xController = new PIDController(1.0, 0.0, 0.0);
-        PIDController yController = new PIDController(1.0, 0.0, 0.0);
-
-        ProfiledPIDController thetaController = new ProfiledPIDController(
-            4.0, 0.0, 0.1,
-            new Constraints(
-                Math.toRadians(360),  // max angular velocity  (rad/s)
-                Math.toRadians(720)   // max angular accel     (rad/s²)
-            ));
-        // CRITICAL: without this the PID spins the wrong way across the ±180° seam
-        thetaController.enableContinuousInput(-Math.PI, Math.PI);
-
-        m_controller = new HolonomicDriveController(xController, yController, thetaController);
-
-        // Tight X/Y tolerance so isFinished() is driven purely by rotation error
-        m_controller.setTolerance(new Pose2d(0.05, 0.05, Rotation2d.fromDegrees(1.0)));
+        m_thetaController = new ProfiledPIDController(
+            4.0, 0.0, 0.0,
+            new Constraints(MAX_OMEGA_RAD_S, MAX_ALPHA_RAD_S2));
+        m_thetaController.enableContinuousInput(-Math.PI, Math.PI);
+        m_thetaController.setTolerance(Units.degreesToRadians(TOLERANCE_DEG));
     }
-
-    // ── Lifecycle ──────────────────────────────────────────────────────────────
 
     @Override
     public void initialize() {
-        // Do NOT call resetPose() here — that wipes odometry and gives a wrong startPos.
         Pose2d startPose = m_swerve.getState().Pose;
-        m_startTimeS     = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        m_startTimeS = Timer.getFPGATimestamp();
 
-        Rotation2d targetRotation = m_isRelative
+        m_targetRotation = m_isRelative
             ? startPose.getRotation().rotateBy(Rotation2d.fromDegrees(m_goalDeg))
             : Rotation2d.fromDegrees(m_goalDeg);
 
-        m_targetPose = new Pose2d(startPose.getTranslation(), targetRotation);
+        // Seed controller from current state for a smooth, jerk-free start
+        m_thetaController.reset(
+            startPose.getRotation().getRadians(),
+            m_swerve.getState().Speeds.omegaRadiansPerSecond);
 
-        SmartDashboard.putNumber("TurnToAngle/TargetDeg", targetRotation.getDegrees());
+        SmartDashboard.putNumber("TurnToAngle/TargetDeg", m_targetRotation.getDegrees());
     }
 
     @Override
     public void execute() {
-        Pose2d        currPose     = m_swerve.getState().Pose;
-        ChassisSpeeds speeds       = m_controller.calculate(
-            currPose, m_targetPose, 0.0, m_targetPose.getRotation());
+        double currentRad = m_swerve.getState().Pose.getRotation().getRadians();
+        double targetRad  = m_targetRotation.getRadians();
 
-        m_swerve.setControl(new SwerveRequest.RobotCentric()
-            .withVelocityX(speeds.vxMetersPerSecond)
-            .withVelocityY(speeds.vyMetersPerSecond)
-            .withRotationalRate(speeds.omegaRadiansPerSecond));
+        double omegaCmd = MathUtil.clamp(
+            m_thetaController.calculate(currentRad, targetRad),
+            -MAX_OMEGA_RAD_S,
+             MAX_OMEGA_RAD_S);
 
-        // Telemetry
-        double errorDeg = m_targetPose.getRotation().getDegrees()
-                        - currPose.getRotation().getDegrees();
-        // Wrap to [-180, 180]
-        errorDeg = ((errorDeg + 180.0) % 360.0) - 180.0;
+        // Zero translation — rotation only
+        m_swerve.setControl(m_driveRequest
+            .withVelocityX(0.0)
+            .withVelocityY(0.0)
+            .withRotationalRate(omegaCmd));
+
+        double errorDeg = MathUtil.inputModulus(
+            Math.toDegrees(targetRad - currentRad), -180.0, 180.0);
         SmartDashboard.putNumber ("TurnToAngle/HeadingErrorDeg", errorDeg);
-        SmartDashboard.putBoolean("TurnToAngle/AtReference",     m_controller.atReference());
-        SmartDashboard.putNumber ("TurnToAngle/ElapsedS",
-            edu.wpi.first.wpilibj.Timer.getFPGATimestamp() - m_startTimeS);
+        SmartDashboard.putBoolean("TurnToAngle/AtGoal",          m_thetaController.atGoal());
+        SmartDashboard.putNumber ("TurnToAngle/ElapsedS",        Timer.getFPGATimestamp() - m_startTimeS);
     }
 
     @Override
     public boolean isFinished() {
-        boolean timeout = (edu.wpi.first.wpilibj.Timer.getFPGATimestamp() - m_startTimeS)
-                          >= TIMEOUT_SECONDS;
-        return m_controller.atReference() || timeout;
+        boolean timeout = (Timer.getFPGATimestamp() - m_startTimeS) >= TIMEOUT_SECONDS;
+        double errorDeg = Math.abs(MathUtil.inputModulus(
+            m_targetRotation.getDegrees() - m_swerve.getState().Pose.getRotation().getDegrees(),
+            -180.0, 180.0));
+        return errorDeg < TOLERANCE_DEG || timeout;
     }
 
     @Override
     public void end(boolean interrupted) {
-        m_swerve.setControl(new SwerveRequest.RobotCentric()
-            .withVelocityX(0.0)
-            .withVelocityY(0.0)
-            .withRotationalRate(0.0));
+        m_swerve.setControl(new SwerveRequest.Idle());
         SmartDashboard.putBoolean("TurnToAngle/Interrupted", interrupted);
     }
 }

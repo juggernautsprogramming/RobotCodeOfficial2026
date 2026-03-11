@@ -11,6 +11,8 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -26,7 +28,6 @@ import frc.robot.subsystems.Shooter.ShotCalculator;
 import frc.robot.subsystems.Climber.ClimberSubsystem;
 import frc.robot.subsystems.Vision.VisionSubsystem;
 import frc.robot.commands.DriveToHubAndShoot;
-import frc.robot.commands.DriveToHubAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurnToAngle;
 
@@ -171,7 +172,7 @@ public class RobotContainer {
                 m_drive
                     .withVelocityX(-m_driverStick.getLeftY()  * kMaxSpeed)
                     .withVelocityY(-m_driverStick.getLeftX()  * kMaxSpeed)
-                    .withRotationalRate(-m_driverStick.getRightX() * kMaxAngularRate)
+                    .withRotationalRate(-MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15) * kMaxAngularRate)
             )
         );
 
@@ -185,12 +186,11 @@ public class RobotContainer {
             )
         );
 
-        // B Button: vision-based hub align + shoot (toggle)
-        m_driverStick.b().toggleOnTrue(
-            new DriveToHubAndShootCommand(
-                drivetrain,
-                shooterSubsystem,
-                visionSubsystem)
+        // ── B Button: Drive to hub + shoot ───────────────────────────────────
+        // Measures current distance to hub, drives to optimal standoff,
+        // aligns to hub center, and fires when all gates pass.
+        m_driverStick.b().whileTrue(
+            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
         // X Button: full auto drive-to-hub + shoot state machine (hold)
@@ -208,8 +208,16 @@ public class RobotContainer {
             drivetrain.applyRequest(() -> m_brake)
         );
 
-        // Y Button: quick-turn to 180°
-        m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 180, false));
+        // ── X Button: Drive to Hub + Shoot (full autonomous sequence) ────────
+        // State machine: DRIVING → ALIGNING → FIRING → DONE.
+        // Flywheel pre-spins on press. Fires automatically when all three gates
+        // pass (aligned < 1.5°, in zone ±0.25 m, RPM ±50). Watch DTHS2/* keys.
+        m_driverStick.x().whileTrue(
+            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
+        );
+
+        // ── Y Button: Quick-turn 45° ──────────────────────────────────────────
+        m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 45, false));
 
         // D-Pad: precision nudge
         m_driverStick.povUp()   .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityX( kNudgeSpeed)));
