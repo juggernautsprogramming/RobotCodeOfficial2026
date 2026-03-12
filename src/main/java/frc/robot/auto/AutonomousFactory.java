@@ -1,18 +1,15 @@
 package frc.robot.auto;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.path.PathConstraints;
-import com.pathplanner.lib.path.PathPlannerPath;
 
-import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.*;
 
 import frc.robot.Constants.AutoStartConstants;
-import frc.robot.commands.RunIntakeCommand;
 import frc.robot.commands.ShootNBallsCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -88,6 +85,7 @@ public class AutonomousFactory {
         m_vision     = vision;
         m_intake     = new IntakeAdapter(actuation, uptake);
 
+        registerNamedCommands();
         buildAndRegister();
     }
 
@@ -101,113 +99,59 @@ public class AutonomousFactory {
 
     // ── Registration ──────────────────────────────────────────────────────────
 
-    private void buildAndRegister() {
-        m_chooser.setDefaultOption("Center Auto (8 balls)",
-            buildSequence("Center",
-                new Pose2d(AutoStartConstants.CENTER_START_X,
-                           AutoStartConstants.CENTER_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.CENTER_START_HDG))));
+    // ── Named commands for PathPlanner GUI ───────────────────────────────────
 
-        m_chooser.addOption("Left Auto (8 balls)",
-            buildSequence("Left",
-                new Pose2d(AutoStartConstants.LEFT_START_X,
-                           AutoStartConstants.LEFT_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.LEFT_START_HDG))));
-
-        m_chooser.addOption("Right Auto (8 balls)",
-            buildSequence("Right",
-                new Pose2d(AutoStartConstants.RIGHT_START_X,
-                           AutoStartConstants.RIGHT_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.RIGHT_START_HDG))));
-
-        SmartDashboard.putData("Auto Chooser", m_chooser);
-    }
-
-    // ── Sequence builder ──────────────────────────────────────────────────────
-
-    private Command buildSequence(String label, Pose2d startPose) {
-
+    /**
+     * Registers all robot actions as named commands so they can be placed as
+     * event markers inside PathPlanner's GUI auto editor.
+     *
+     * Available names (use these exact strings in the PathPlanner app):
+     *   "SpinUpFlywheel"  — set flywheel to optimal RPM and hood angle
+     *   "IdleFlywheel"    — return flywheel to idle speed
+     *   "ShootPreloads"   — fire the 3 preloaded balls
+     *   "ShootPickups"    — fire the 5 picked-up balls
+     *   "StartIntake"     — deploy arm and run intake roller
+     *   "StopIntake"      — retract arm and stop intake roller
+     *   "AlignToTag"      — rotate to nearest AprilTag (max 2.5 s)
+     */
+    private void registerNamedCommands() {
         double optRPM     = ShotCalculator.OPTIMAL_SHOT.rpm();
         double optHoodDeg = ShotCalculator.OPTIMAL_SHOT.hoodDeg();
 
-        // Phase 0: Seed odometry
-        Command resetPose = new InstantCommand(
-            () -> m_drivetrain.resetPose(startPose));
+        NamedCommands.registerCommand("SpinUpFlywheel", new InstantCommand(() -> {
+            m_shooter.setFlywheelRPM(optRPM);
+            m_shooter.setLaunchAngleDeg(optHoodDeg);
+        }));
 
-        // Phase 1: Drive to first shoot zone (~2 m forward) + pre-spin flywheel
-        Command driveToShot1 = new ParallelCommandGroup(
-            loadPath(label + "_StartToShoot"),
-            new InstantCommand(() -> {
-                m_shooter.setFlywheelRPM(optRPM);
-                m_shooter.setLaunchAngleDeg(optHoodDeg);
-            })
-        );
+        NamedCommands.registerCommand("IdleFlywheel",
+            new InstantCommand(m_shooter::idleFlywheel));
 
-        // Phase 2: Fire 3 preloaded balls
-        Command shootPreloads = new ShootNBallsCommand(
-            m_shooter, AutoStartConstants.PRELOAD_BALL_COUNT, optRPM);
+        NamedCommands.registerCommand("ShootPreloads",
+            new ShootNBallsCommand(m_shooter, AutoStartConstants.PRELOAD_BALL_COUNT, optRPM));
 
-        // Phase 3: Drive to pickup zone with intake running the whole way
-        Command driveToPickup = new SequentialCommandGroup(
-            new InstantCommand(m_intake::run, m_actuation, m_uptake),
-            loadPath(label + "_ShootToPickup"),
-            new InstantCommand(m_intake::stop, m_actuation, m_uptake)
-        );
+        NamedCommands.registerCommand("ShootPickups",
+            new ShootNBallsCommand(m_shooter, AutoStartConstants.PICKUP_BALL_COUNT, optRPM));
 
-        // Phase 4: Safety intake catch — max 3 s
-        Command intakeSafety = new RunIntakeCommand(m_intake, m_actuation, m_uptake)
-            .withTimeout(3.0);
+        NamedCommands.registerCommand("StartIntake",
+            new InstantCommand(m_intake::run, m_actuation, m_uptake));
 
-        // Phase 5: Drive to second shoot zone + pre-spin flywheel
-        Command driveToShot2 = new ParallelCommandGroup(
-            loadPath(label + "_PickupToShoot2"),
-            new InstantCommand(() -> {
-                m_shooter.setFlywheelRPM(optRPM);
-                m_shooter.setLaunchAngleDeg(optHoodDeg);
-            })
-        );
+        NamedCommands.registerCommand("StopIntake",
+            new InstantCommand(m_intake::stop, m_actuation, m_uptake));
 
-        // Phase 6: Align to AprilTag (hold position, rotate only) then shoot 5
-        Command alignAndShoot = new SequentialCommandGroup(
-            new SnapHeadingToTag(
-                m_drivetrain, m_vision,
-                () -> 0.0,  // no X translation while aligning
-                () -> 0.0   // no Y translation while aligning
-            ).withTimeout(2.5),
-            new ShootNBallsCommand(
-                m_shooter, AutoStartConstants.PICKUP_BALL_COUNT, optRPM)
-        );
-
-        // Phase 7: Cleanup — idle flywheel and stow intake
-        Command cleanup = new InstantCommand(() -> {
-            m_shooter.idleFlywheel();
-            m_intake.stop();
-        });
-
-        return new SequentialCommandGroup(
-            resetPose,
-            driveToShot1,
-            shootPreloads,
-            driveToPickup,
-            intakeSafety,
-            driveToShot2,
-            alignAndShoot,
-            cleanup
-        )
-        .withTimeout(AutoStartConstants.AUTO_TIMEOUT_S)
-        .withName(label + "Auto8Ball");
+        NamedCommands.registerCommand("AlignToTag",
+            new SnapHeadingToTag(m_drivetrain, m_vision, () -> 0.0, () -> 0.0)
+                .withTimeout(2.5));
     }
 
-    // ── PathPlanner path loader ───────────────────────────────────────────────
+    private void buildAndRegister() {
+        // Safe default — does nothing if no auto is selected
+        m_chooser.setDefaultOption("Do Nothing", Commands.none());
 
-    private Command loadPath(String pathName) {
-        try {
-            PathPlannerPath path = PathPlannerPath.fromPathFile(pathName);
-            return AutoBuilder.followPath(path);
-        } catch (Exception e) {
-            System.err.println("[AutoFactory] Missing path: " + pathName + ".path");
-            System.err.println("  → Place in: deploy/pathplanner/paths/");
-            return new WaitCommand(0.5);
+        // Load every .auto file from deploy/pathplanner/autos/ automatically
+        for (String name : AutoBuilder.getAllAutoNames()) {
+            m_chooser.addOption(name, AutoBuilder.buildAuto(name));
         }
+
+        SmartDashboard.putData("Auto Chooser", m_chooser);
     }
 }

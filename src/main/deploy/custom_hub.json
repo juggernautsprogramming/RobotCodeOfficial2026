@@ -2,28 +2,28 @@
   "field": { "length": 8.0, "width": 8.052 },
   "tags": [
     {
-      "ID": 19,
+      "ID": 9,
       "pose": {
         "translation": { "x": 4, "y": 4.026, "z": 1.35 },
         "rotation": { "quaternion": { "W": 0, "X": 0, "Y": 0, "Z": 1 } }
       }
     },
     {
-      "ID": 9,
+      "ID": 19,
       "pose": {
         "translation": { "x": 5.1938, "y": 4.026, "z": 1.35 },
         "rotation": { "quaternion": { "W": 1, "X": 0, "Y": 0, "Z": 0 } }
       }
     },
     {
-      "ID": 11,
+      "ID": 8,
       "pose": {
         "translation": { "x": 4.5969, "y": 4.6229, "z": 1.35 },
         "rotation": { "quaternion": { "W": 0.707, "X": 0, "Y": 0, "Z": 0.707 } }
       }
     },
     {
-      "ID": 8,
+      "ID": 11,
       "pose": {
         "translation": { "x": 4.5969, "y": 3.4291, "z": 1.35 },
         "rotation": { "quaternion": { "W": 0.707, "X": 0, "Y": 0, "Z": -0.707 } }

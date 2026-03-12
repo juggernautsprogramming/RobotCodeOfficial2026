@@ -4,29 +4,27 @@ import static edu.wpi.first.units.Units.*;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
-import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.config.PIDConstants;
-import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
+// Constants
 import frc.robot.Constants.VisionHardware;
-import frc.robot.auto.AutonomousFactory;
 import frc.robot.generated.TunerConstants;
-import frc.robot.subsystems.CommandSwerveDrivetrain;
-import frc.robot.subsystems.Intake.ActuationSubsystem;
-import frc.robot.subsystems.Intake.UptakeSubsystem;
-import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Shooter.ShotCalculator;
-import frc.robot.subsystems.Climber.ClimberSubsystem;
+
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+
+// Subsystems
+import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Vision.VisionSubsystem;
+import frc.robot.subsystems.Shooter.ShooterSubsystem;
+import frc.robot.subsystems.Climber.ClimberSubsystem;
+
+// Commands
 import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurnToAngle;
@@ -36,17 +34,16 @@ import frc.robot.commands.TurnToAngle;
  *
  * <h3>Button map (Driver — port 0)</h3>
  * <pre>
- *   Left  Joystick        — Translation (field-centric)
- *   Right Joystick X      — Rotation
- *   Right Bumper  (hold)  — Auto-align heading to best visible AprilTag
- *   B Button      (toggle)— DriveToHubAndShootCommand (vision-based hub align)
- *   X Button      (hold)  — DriveToHubAndShoot (full state-machine: drive+align+fire)
- *   Left  Bumper          — Gyro reset (re-seed field-centric)
- *   A Button      (hold)  — Emergency brake (X-lock)
- *   Y Button              — Quick-turn to 180°
- *   Left  Trigger (hold)  — Climber up   → hold position on release
- *   Right Trigger (hold)  — Climber down → hold position on release
- *   D-Pad                 — Precision nudge
+ *   Left  Joystick      — Translation (field-centric)
+ *   Right Joystick X    — Rotation
+ *   Right Bumper        — Auto-align to AprilTag (hold)
+ *   B Button            — Drive to Hub + Shoot (hold, auto-releases after shot)
+ *   Left  Bumper        — Gyro reset (field-centric re-seed)
+ *   A Button            — Emergency brake
+ *   Y Button            — Quick turn to 180°
+ *   Left Trigger (hold) — Climber up (hold), hold position on release
+ *   Right Trigger (hold)— Climber down (hold), hold position on release
+ *   D-Pad               — Precision nudge
  * </pre>
  */
 public class RobotContainer {
@@ -68,8 +65,7 @@ public class RobotContainer {
 
     // ── Controllers ───────────────────────────────────────────────────────────
     private final CommandXboxController m_driverStick = new CommandXboxController(0);
-    // Operator controller — reserved for future use (intake/shooter manual overrides)
-    @SuppressWarnings("unused")
+
     private final CommandXboxController m_playerStick = new CommandXboxController(1);
 
     // ── Subsystems ────────────────────────────────────────────────────────────
@@ -77,20 +73,15 @@ public class RobotContainer {
     public final VisionSubsystem         visionSubsystem;
     public final ShooterSubsystem        shooterSubsystem;
     public final ClimberSubsystem        climberSubsystem;
-    public final ActuationSubsystem      actuationSubsystem;
-    public final UptakeSubsystem         uptakeSubsystem;
-
-    // ── Autonomous ────────────────────────────────────────────────────────────
-    private final AutonomousFactory m_autoFactory;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public RobotContainer() {
-
         // 1. Drivetrain MUST be first — everything else depends on it
         drivetrain = TunerConstants.createDrivetrain();
 
-        // 2. Vision — names must match exactly what is set in PhotonVision UI
+        // 2. Vision — camera names come from VisionHardware constants
+        //    (these must match exactly what is set in the PhotonVision web UI)
         visionSubsystem = new VisionSubsystem(
             new String[]{
                 VisionHardware.CAMERA_BACK_LEFT,
@@ -105,68 +96,21 @@ public class RobotContainer {
         // 4. Climber
         climberSubsystem = new ClimberSubsystem();
 
-        // 5. Intake — arm (actuation) + roller (uptake)
-        actuationSubsystem = new ActuationSubsystem();
-        uptakeSubsystem    = new UptakeSubsystem();
-
-        // 6. PathPlanner AutoBuilder — MUST be configured before AutonomousFactory
-        configurePathPlanner();
-
-        // 7. Autonomous chooser
-        m_autoFactory = new AutonomousFactory(
-            drivetrain,
-            shooterSubsystem,
-            actuationSubsystem,
-            uptakeSubsystem,
-            visionSubsystem
-        );
-
-        // 8. Publish static shot-calculator results to dashboard
+        // Publish static shot-calculator results once so Elastic can see the
+        // DTHS/* keys immediately on connect, before the command ever runs.
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
         SmartDashboard.putNumber("DTHS/OptimalAngle_deg", ShotCalculator.OPTIMAL_SHOT.hoodDeg());
         SmartDashboard.putNumber("DTHS/OptimalRPM",       ShotCalculator.OPTIMAL_SHOT.rpm());
         SmartDashboard.putNumber("DTHS/OptimalEntry_deg", ShotCalculator.OPTIMAL_SHOT.entryAngle());
 
-        // 9. Button bindings — always last
         configureBindings();
-    }
-
-    // ── PathPlanner configuration ─────────────────────────────────────────────
-
-    private void configurePathPlanner() {
-        try {
-            RobotConfig config = RobotConfig.fromGUISettings();
-
-            AutoBuilder.configure(
-                () -> drivetrain.getState().Pose,
-                drivetrain::resetPose,
-                () -> drivetrain.getState().Speeds,
-                (speeds, feedforwards) -> drivetrain.driveRobotRelative(speeds),
-                new PPHolonomicDriveController(
-                    new PIDConstants(5.0, 0.0, 0.0),  // translation kP
-                    new PIDConstants(5.0, 0.0, 0.0)   // rotation kP
-                ),
-                config,
-                () -> {
-                    var alliance = DriverStation.getAlliance();
-                    return alliance.isPresent()
-                        && alliance.get() == DriverStation.Alliance.Red;
-                },
-                drivetrain
-            );
-
-        } catch (Exception e) {
-            System.err.println("[RobotContainer] PathPlanner AutoBuilder config failed!");
-            System.err.println("  → Open project in PathPlanner app, configure settings, re-deploy.");
-            System.err.println("  → Exception: " + e);
-        }
     }
 
     // ── Button bindings ───────────────────────────────────────────────────────
 
     private void configureBindings() {
 
-        // Default: field-centric teleop drive
+        // ── Default: field-centric teleop ─────────────────────────────────────
         drivetrain.setDefaultCommand(
             drivetrain.applyRequest(() ->
                 m_drive
@@ -176,7 +120,10 @@ public class RobotContainer {
             )
         );
 
-        // Right Bumper: continuous AprilTag heading lock (hold)
+        // ── Right Bumper: Continuous heading alignment to best visible AprilTag ─
+        // Hold → robot continuously faces whatever tag is visible.
+        // Driver keeps full X/Y translation control.
+        // Releases when button is released; holds last known heading if tag lost.
         m_driverStick.rightBumper().whileTrue(
             new SnapHeadingToTag(
                 drivetrain,
@@ -193,17 +140,13 @@ public class RobotContainer {
             new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
-        // X Button: full auto drive-to-hub + shoot state machine (hold)
-        m_driverStick.x().whileTrue(
-            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
-        );
-
-        // Left Bumper: gyro reset
+        // ── Left Bumper: Gyro reset ───────────────────────────────────────────
+        // Re-seeds field-centric heading so the current robot direction = "forward".
         m_driverStick.leftBumper().onTrue(
             drivetrain.runOnce(drivetrain::seedFieldCentric)
         );
 
-        // A Button: emergency brake (X-lock)
+        // ── A Button: Emergency brake ─────────────────────────────────────────
         m_driverStick.a().whileTrue(
             drivetrain.applyRequest(() -> m_brake)
         );
@@ -219,13 +162,15 @@ public class RobotContainer {
         // ── Y Button: Quick-turn 45° ──────────────────────────────────────────
         m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 45, false));
 
-        // D-Pad: precision nudge
+        // ── D-Pad: Precision nudge ────────────────────────────────────────────
         m_driverStick.povUp()   .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityX( kNudgeSpeed)));
         m_driverStick.povDown() .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityX(-kNudgeSpeed)));
         m_driverStick.povLeft() .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityY( kNudgeSpeed)));
         m_driverStick.povRight().whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityY(-kNudgeSpeed)));
 
-        // Left Trigger: climber up → hold position on release
+        // ── Left Trigger: Climber up (manual, hold then hold-position) ────────
+        // NOTE: was previously on leftBumper — moved to leftTrigger to free
+        //       leftBumper for gyro reset (the original code had a conflict).
         m_driverStick.leftTrigger().whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
         ).onFalse(
@@ -235,7 +180,7 @@ public class RobotContainer {
             }, climberSubsystem)
         );
 
-        // Right Trigger: climber down → hold position on release
+        // ── Right Trigger: Climber down (manual, hold then hold-position) ─────
         m_driverStick.rightTrigger().whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
         ).onFalse(
@@ -245,12 +190,13 @@ public class RobotContainer {
             }, climberSubsystem)
         );
 
-        // Telemetry
+        // ── Telemetry hook ────────────────────────────────────────────────────
         drivetrain.registerTelemetry(m_logger::telemeterize);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /** Returns the robot's current heading in degrees (field-relative). */
     public double getCurrentRotation() {
         return drivetrain.getState().Pose.getRotation().getDegrees();
     }
@@ -258,6 +204,18 @@ public class RobotContainer {
     // ── Autonomous ────────────────────────────────────────────────────────────
 
     public Command getAutonomousCommand() {
-        return m_autoFactory.getSelected();
+        final var idle = new SwerveRequest.Idle();
+        return Commands.sequence(
+            // Re-seed field-centric so autonomous starts with the correct heading
+            drivetrain.runOnce(() -> drivetrain.seedFieldCentric(Rotation2d.kZero)),
+            // Drive forward for 5 seconds
+            drivetrain.applyRequest(() ->
+                m_drive
+                    .withVelocityX(0.5)
+                    .withVelocityY(0.0)
+                    .withRotationalRate(0.0)
+            ).withTimeout(5.0),
+            drivetrain.applyRequest(() -> idle)
+        );
     }
 }

@@ -233,17 +233,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             ? new Pose2d(robotPose.getTranslation(), getState().RawHeading)
             : robotPose);
 
-        // ── AdvantageScope display-friendly poses ─────────────────────────────
-        // If the field appears reversed in AdvantageScope (forward=backward,
-        // left=right), use these Display/* keys instead of Drive/RobotPose3d.
-        // They are the actual poses rotated 180° around the field centre so the
-        // robot tracks correctly on AdvantageScope's field image.
-        double fx = VisionConstants.FIELD_LENGTH_M - robotPose.getX();
-        double fy = VisionConstants.FIELD_WIDTH_M  - robotPose.getY();
-        Rotation2d fRot = robotPose.getRotation().rotateBy(Rotation2d.k180deg);
-        Pose2d displayPose = new Pose2d(fx, fy, fRot);
-        Logger.recordOutput("Display/RobotPose2d", displayPose);
-        Logger.recordOutput("Display/RobotPose3d", new Pose3d(displayPose));
     }
     private void startSimThread() {
         m_lastSimTime = Utils.getCurrentTimeSeconds();

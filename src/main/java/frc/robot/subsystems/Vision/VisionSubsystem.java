@@ -138,19 +138,11 @@ public class VisionSubsystem extends SubsystemBase {
     private static final double AMBIGUITY_SCALE  = 4.0;
 
     /**
-     * Rotation std-dev (radians) for multi-tag pose estimates.
-     * Lower value = vision heading is trusted more.  Odometry/gyro still dominates
-     * because WPILib's default gyro noise is ~0.01 rad (~0.6°), but this lets
-     * vision nudge heading slightly when two or more tags agree on the angle.
+     * Rotation std-dev for all vision pose estimates.
+     * Set to a very large value so vision NEVER influences heading — gyro owns it.
+     * Vision only corrects XY position.
      */
-    private static final double ROT_STDDEV_MULTI_TAG_RAD  = Units.degreesToRadians(12.0);
-
-    /**
-     * Rotation std-dev (radians) for single-tag pose estimates.
-     * Higher than multi-tag because a single-tag heading is less reliable.
-     * Still contributes a small influence so heading doesn't drift completely.
-     */
-    private static final double ROT_STDDEV_SINGLE_TAG_RAD = Units.degreesToRadians(30.0);
+    private static final double ROT_STDDEV_RAD = 9999.0;
 
     // ── Logging ───────────────────────────────────────────────────────────────
 
@@ -318,13 +310,8 @@ public class VisionSubsystem extends SubsystemBase {
                 // Ambiguity penalty: linearly scale up std-dev for higher ambiguity
                 xyStdDev *= (1.0 + ambiguity * (AMBIGUITY_SCALE - 1.0));
 
-                // Rotation: odometry/gyro is primary, but vision heading always
-                // contributes a small amount.  Multi-tag gives a tighter constraint
-                // (12°) than single-tag (30°).  Gyro drift is ~0.6° so it wins, but
-                // vision prevents long-term heading creep.
-                double rotStdDev = (tagCount >= 2)
-                    ? ROT_STDDEV_MULTI_TAG_RAD
-                    : ROT_STDDEV_SINGLE_TAG_RAD;
+                // Rotation: gyro owns heading. Vision only corrects XY.
+                double rotStdDev = ROT_STDDEV_RAD;
 
                 // ── Feed to Kalman filter at the historical timestamp ──────────
                 // Skipped when vision is paused (e.g. DriveToPose is active) so
