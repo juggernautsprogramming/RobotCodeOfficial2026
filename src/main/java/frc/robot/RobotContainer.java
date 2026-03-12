@@ -15,6 +15,7 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -33,6 +34,10 @@ import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Vision.VisionSubsystem;
 import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Climber.ClimberSubsystem;
+import frc.robot.subsystems.Feeder.FeederSubsystem;
+import frc.robot.subsystems.Intake.ActuationSubsystem;
+import frc.robot.subsystems.Intake.UptakeSubsystem;
+import frc.robot.subsystems.Intake.IntakeAdapter;
 
 // Commands
 import frc.robot.commands.DriveToHubAndShoot;
@@ -50,10 +55,19 @@ import frc.robot.commands.TurnToAngle;
  *   B Button            — Drive to Hub + Shoot (hold, auto-releases after shot)
  *   Left  Bumper        — Gyro reset (field-centric re-seed)
  *   A Button            — Emergency brake
- *   Y Button            — Quick turn to 180°
- *   Left Trigger (hold) — Climber up (hold), hold position on release
- *   Right Trigger (hold)— Climber down (hold), hold position on release
+ *   Y Button            — Quick turn to 45°
  *   D-Pad               — Precision nudge
+ * </pre>
+ *
+ * <h3>Button map (Operator — port 1)</h3>
+ * <pre>
+ *   A Button             — Toggle intake  (deploy + spin  ↔ stow + stop)
+ *   B Button             — Toggle feeder  (run forward     ↔ stop)
+ *   X Button             — Toggle shooter flywheel (spin up to optimal RPM ↔ idle)
+ *   Left Trigger  (hold) — Climber up,   hold position on release
+ *   Right Trigger (hold) — Climber down, hold position on release
+ *   Left Bumper          — Eject (intake reverse, hold)
+ *   Right Bumper         — Reverse feeder (hold)
  * </pre>
  */
 public class RobotContainer {
@@ -81,11 +95,18 @@ public class RobotContainer {
     // ── Autonomous chooser ────────────────────────────────────────────────────
     private final SendableChooser<Command> m_autoChooser;
 
+    /** Field2d used to display PathPlanner path + target pose in AdvantageScope 2D view. */
+    private final Field2d m_pathPlannerField = new Field2d();
+
     // ── Subsystems ────────────────────────────────────────────────────────────
     public final CommandSwerveDrivetrain drivetrain;
     public final VisionSubsystem         visionSubsystem;
     public final ShooterSubsystem        shooterSubsystem;
     public final ClimberSubsystem        climberSubsystem;
+    public final FeederSubsystem         feederSubsystem;
+    public final ActuationSubsystem      actuationSubsystem;
+    public final UptakeSubsystem         uptakeSubsystem;
+    public final IntakeAdapter           intakeAdapter;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -98,8 +119,8 @@ public class RobotContainer {
 
         // 3. Configure PathPlanner AutoBuilder
         //    Pose supplier uses SwerveDrivePoseEstimator (vision-fused) — NOT raw encoders.
-        //    If wheels slip, vision sees the tags and corrects the pose; PathPlanner then
-        //    re-plans automatically via dynamic replanning.
+        //    Dynamic replanning is built into FollowPathCommand in PathPlanner 2026 and runs
+        //    automatically — no ReplanningConfig needed (class removed in 2026 API).
         try {
             RobotConfig config = RobotConfig.fromGUISettings();
 
@@ -121,14 +142,18 @@ public class RobotContainer {
         }
 
         // 4. PathPlanner → AdvantageScope logging
-        //    "PathPlanner/TargetPose" = where PathPlanner wants the robot to be right now.
-        //    "PathPlanner/ActivePath" = the full path being followed (rendered as a curve).
-        //    In AdvantageScope 3D field: if the actual robot trails the target ghost,
-        //    your Translation kP is too low.
-        PathPlannerLogging.setLogTargetPoseCallback(
-            pose -> Logger.recordOutput("PathPlanner/TargetPose", pose));
-        PathPlannerLogging.setLogActivePathCallback(
-            path -> Logger.recordOutput("PathPlanner/ActivePath", path.toArray(new Pose2d[0])));
+        //    Field2d approach: AdvantageScope 2D field natively understands Field2d objects,
+        //    so "active-path" shows up as a selectable Trajectory and "target" as a robot pose.
+        SmartDashboard.putData("PathPlanner/Field", m_pathPlannerField);
+
+        PathPlannerLogging.setLogActivePathCallback(path -> {
+            Logger.recordOutput("PathPlanner/ActivePath", path.toArray(new Pose2d[0]));
+            m_pathPlannerField.getObject("active-path").setPoses(path);
+        });
+        PathPlannerLogging.setLogTargetPoseCallback(pose -> {
+            Logger.recordOutput("PathPlanner/TargetPose", pose);
+            m_pathPlannerField.getObject("target-pose").setPose(pose);
+        });
         PathPlannerLogging.setLogCurrentPoseCallback(
             pose -> Logger.recordOutput("PathPlanner/CurrentPose", pose));
 
@@ -158,7 +183,11 @@ public class RobotContainer {
             },
             drivetrain
         );
-        climberSubsystem = new ClimberSubsystem();
+        climberSubsystem    = new ClimberSubsystem();
+        feederSubsystem     = new FeederSubsystem();
+        actuationSubsystem  = new ActuationSubsystem();
+        uptakeSubsystem     = new UptakeSubsystem();
+        intakeAdapter       = new IntakeAdapter(actuationSubsystem, uptakeSubsystem);
 
         // Publish static shot-calculator results once so Elastic can see the
         // DTHS/* keys immediately on connect, before the command ever runs.
@@ -232,10 +261,40 @@ public class RobotContainer {
         m_driverStick.povLeft() .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityY( kNudgeSpeed)));
         m_driverStick.povRight().whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityY(-kNudgeSpeed)));
 
-        // ── Left Trigger: Climber up (manual, hold then hold-position) ────────
-        // NOTE: was previously on leftBumper — moved to leftTrigger to free
-        //       leftBumper for gyro reset (the original code had a conflict).
-        m_driverStick.leftTrigger().whileTrue(
+        // ── Operator (port 1) ─────────────────────────────────────────────────
+
+        // A: Toggle intake — deploy + spin roller  ↔  stow + stop
+        m_playerStick.a().toggleOnTrue(
+            Commands.startEnd(
+                intakeAdapter::run,
+                intakeAdapter::stop,
+                actuationSubsystem, uptakeSubsystem
+            )
+        );
+
+        // B: Toggle feeder — run forward  ↔  stop
+        m_playerStick.b().toggleOnTrue(
+            Commands.startEnd(
+                () -> feederSubsystem.setPower(0.8),
+                feederSubsystem::stop,
+                feederSubsystem
+            )
+        );
+
+        // X: Toggle shooter flywheel — spin up to optimal RPM  ↔  idle
+        m_playerStick.x().toggleOnTrue(
+            Commands.startEnd(
+                () -> {
+                    shooterSubsystem.setFlywheelRPM(ShotCalculator.OPTIMAL_SHOT.rpm());
+                    shooterSubsystem.setLaunchAngleDeg(ShotCalculator.OPTIMAL_SHOT.hoodDeg());
+                },
+                shooterSubsystem::idleFlywheel,
+                shooterSubsystem
+            )
+        );
+
+        // Left Trigger: Climber up (hold), hold position on release
+        m_playerStick.leftTrigger().whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
         ).onFalse(
             Commands.runOnce(() -> {
@@ -244,14 +303,24 @@ public class RobotContainer {
             }, climberSubsystem)
         );
 
-        // ── Right Trigger: Climber down (manual, hold then hold-position) ─────
-        m_driverStick.rightTrigger().whileTrue(
+        // Right Trigger: Climber down (hold), hold position on release
+        m_playerStick.rightTrigger().whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
         ).onFalse(
             Commands.runOnce(() -> {
                 double pos = climberSubsystem.getCurrentPosition();
                 climberSubsystem.setPositionDegrees(pos * 360.0);
             }, climberSubsystem)
+        );
+
+        // Left Bumper: Eject — intake roller reverse (hold)
+        m_playerStick.leftBumper().whileTrue(
+            Commands.run(intakeAdapter::eject, actuationSubsystem, uptakeSubsystem)
+        );
+
+        // Right Bumper: Reverse feeder (hold)
+        m_playerStick.rightBumper().whileTrue(
+            Commands.run(() -> feederSubsystem.setPower(-0.5), feederSubsystem)
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────

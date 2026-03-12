@@ -143,7 +143,7 @@ public class HubAlignController {
             hubPose.getX() - robotPose.getX());
 
         double currentDist = robotPose.getTranslation().getDistance(hubPose);
-        double rawDrive    = m_drivePID.calculate(currentDist, desiredStandoff);
+        double rawDrive    = -m_drivePID.calculate(currentDist, desiredStandoff);
         rawDrive = MathUtil.clamp(rawDrive,
             -ShooterConstants.DRIVE_MAX_SPEED_MPS,
              ShooterConstants.DRIVE_MAX_SPEED_MPS);
