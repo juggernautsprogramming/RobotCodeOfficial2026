@@ -4,19 +4,29 @@ import static edu.wpi.first.units.Units.*;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
+import com.pathplanner.lib.config.PIDConstants;
+import com.pathplanner.lib.config.RobotConfig;
+import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.util.PathPlannerLogging;
 
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import org.littletonrobotics.junction.Logger;
 
 // Constants
+import frc.robot.Constants.DriveToPoseConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.Shooter.ShotCalculator;
-
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 // Subsystems
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -68,6 +78,9 @@ public class RobotContainer {
 
     private final CommandXboxController m_playerStick = new CommandXboxController(1);
 
+    // ── Autonomous chooser ────────────────────────────────────────────────────
+    private final SendableChooser<Command> m_autoChooser;
+
     // ── Subsystems ────────────────────────────────────────────────────────────
     public final CommandSwerveDrivetrain drivetrain;
     public final VisionSubsystem         visionSubsystem;
@@ -80,8 +93,64 @@ public class RobotContainer {
         // 1. Drivetrain MUST be first — everything else depends on it
         drivetrain = TunerConstants.createDrivetrain();
 
-        // 2. Vision — camera names come from VisionHardware constants
-        //    (these must match exactly what is set in the PhotonVision web UI)
+        // 2. Shooter created early — needed by Named Commands below
+        shooterSubsystem = new ShooterSubsystem();
+
+        // 3. Configure PathPlanner AutoBuilder
+        //    Pose supplier uses SwerveDrivePoseEstimator (vision-fused) — NOT raw encoders.
+        //    If wheels slip, vision sees the tags and corrects the pose; PathPlanner then
+        //    re-plans automatically via dynamic replanning.
+        try {
+            RobotConfig config = RobotConfig.fromGUISettings();
+
+            AutoBuilder.configure(
+                () -> drivetrain.getState().Pose,                          // vision-fused pose
+                drivetrain::resetPose,
+                () -> drivetrain.getState().Speeds,
+                (speeds, feedforwards) -> drivetrain.driveRobotRelative(speeds),
+                new PPHolonomicDriveController(
+                    new PIDConstants(DriveToPoseConstants.kP_XY,    0, DriveToPoseConstants.kD_XY),
+                    new PIDConstants(DriveToPoseConstants.kP_THETA, 0, DriveToPoseConstants.kD_THETA)
+                ),
+                config,
+                () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
+                drivetrain
+            );
+        } catch (Exception e) {
+            DriverStation.reportError("AutoBuilder config failed: " + e.getMessage(), e.getStackTrace());
+        }
+
+        // 4. PathPlanner → AdvantageScope logging
+        //    "PathPlanner/TargetPose" = where PathPlanner wants the robot to be right now.
+        //    "PathPlanner/ActivePath" = the full path being followed (rendered as a curve).
+        //    In AdvantageScope 3D field: if the actual robot trails the target ghost,
+        //    your Translation kP is too low.
+        PathPlannerLogging.setLogTargetPoseCallback(
+            pose -> Logger.recordOutput("PathPlanner/TargetPose", pose));
+        PathPlannerLogging.setLogActivePathCallback(
+            path -> Logger.recordOutput("PathPlanner/ActivePath", path.toArray(new Pose2d[0])));
+        PathPlannerLogging.setLogCurrentPoseCallback(
+            pose -> Logger.recordOutput("PathPlanner/CurrentPose", pose));
+
+        // 5. Register Named Commands — must be done BEFORE buildAuto() is called.
+        //    These names must match exactly what is typed in the PathPlanner GUI.
+        NamedCommands.registerCommand("SpinUpFlywheel", Commands.runOnce(() -> {
+            shooterSubsystem.setFlywheelRPM(ShotCalculator.OPTIMAL_SHOT.rpm());
+            shooterSubsystem.setLaunchAngleDeg(ShotCalculator.OPTIMAL_SHOT.hoodDeg());
+        }, shooterSubsystem));
+
+        NamedCommands.registerCommand("IdleFlywheel",
+            Commands.runOnce(shooterSubsystem::idleFlywheel, shooterSubsystem));
+
+        // 6. Build auto chooser from all .auto files in deploy/pathplanner/autos/
+        m_autoChooser = new SendableChooser<>();
+        m_autoChooser.setDefaultOption("Do Nothing", Commands.none());
+        for (String name : AutoBuilder.getAllAutoNames()) {
+            m_autoChooser.addOption(name, AutoBuilder.buildAuto(name));
+        }
+        SmartDashboard.putData("Auto Chooser", m_autoChooser);
+
+        // 7. Remaining subsystems
         visionSubsystem = new VisionSubsystem(
             new String[]{
                 VisionHardware.CAMERA_BACK_LEFT,
@@ -89,11 +158,6 @@ public class RobotContainer {
             },
             drivetrain
         );
-
-        // 3. Shooter
-        shooterSubsystem = new ShooterSubsystem();
-
-        // 4. Climber
         climberSubsystem = new ClimberSubsystem();
 
         // Publish static shot-calculator results once so Elastic can see the
@@ -204,18 +268,6 @@ public class RobotContainer {
     // ── Autonomous ────────────────────────────────────────────────────────────
 
     public Command getAutonomousCommand() {
-        final var idle = new SwerveRequest.Idle();
-        return Commands.sequence(
-            // Re-seed field-centric so autonomous starts with the correct heading
-            drivetrain.runOnce(() -> drivetrain.seedFieldCentric(Rotation2d.kZero)),
-            // Drive forward for 5 seconds
-            drivetrain.applyRequest(() ->
-                m_drive
-                    .withVelocityX(0.5)
-                    .withVelocityY(0.0)
-                    .withRotationalRate(0.0)
-            ).withTimeout(5.0),
-            drivetrain.applyRequest(() -> idle)
-        );
+        return m_autoChooser.getSelected();
     }
 }

@@ -5,6 +5,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructArrayPublisher;
+import edu.wpi.first.networktables.StructPublisher;
+
 import org.littletonrobotics.junction.Logger;
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonUtils;
@@ -206,6 +210,14 @@ public class VisionSubsystem extends SubsystemBase {
     /** PID for raw yaw-alignment commands (used by AlignToTag). */
     private final PIDController m_alignPID;
 
+    // ── NT4 StructPublishers ──────────────────────────────────────────────────
+
+    /** Latest accepted vision pose — viewable in AdvantageScope as 'Vision/RobotPose'. */
+    private final StructPublisher<Pose3d> m_visionPosePublisher;
+
+    /** Robot-to-camera transforms for all cameras — 'Vision/CameraTransforms'. */
+    private final StructArrayPublisher<Transform3d> m_cameraTransformPublisher;
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     /**
@@ -228,6 +240,18 @@ public class VisionSubsystem extends SubsystemBase {
 
         SmartDashboard.putData("Vision/Field Map",     m_field);
         SmartDashboard.putData("Vision/Field Cameras", m_fieldCameras);
+
+        var nt = NetworkTableInstance.getDefault();
+        m_visionPosePublisher      = nt.getStructTopic("Vision/RobotPose", Pose3d.struct).publish();
+        m_cameraTransformPublisher = nt.getStructArrayTopic("Vision/CameraTransforms", Transform3d.struct).publish();
+
+        // Publish static camera offsets once — they don't change at runtime
+        Transform3d[] offsets = new Transform3d[cameraNames.length];
+        for (int i = 0; i < cameraNames.length; i++) {
+            offsets[i] = VisionHardware.kCameraOffsets.getOrDefault(
+                cameraNames[i], VisionHardware.kDefaultRobotToCam);
+        }
+        m_cameraTransformPublisher.set(offsets);
     }
 
     // ── Periodic ──────────────────────────────────────────────────────────────
@@ -275,10 +299,18 @@ public class VisionSubsystem extends SubsystemBase {
                 // (b) Field boundaries: robot cannot be outside the field
                 if (!isWithinField(estPose)) { rejOutOfBounds++; continue; }
 
-                // ── Tag metrics (needed for jump handling AND trust model) ─────
+                // ── Tag metrics from this specific estimate's targets ─────────
+                // Computed from estimate.targetsUsed so each frame in the batch
+                // gets its own correct distance/ambiguity — not stale latest-result values.
                 int    tagCount  = estimate.targetsUsed.size();
-                double dist      = sensor.getAverageDistanceToTags();
-                double ambiguity = sensor.getAmbiguity();
+                double dist      = 0.0;
+                for (var t : estimate.targetsUsed) {
+                    dist += t.getBestCameraToTarget().getTranslation().getNorm();
+                }
+                if (tagCount > 0) dist /= tagCount;
+                double ambiguity = estimate.targetsUsed.stream()
+                    .mapToDouble(t -> t.getPoseAmbiguity())
+                    .min().orElse(1.0);
 
                 // (c) Large pose jump handling
                 // Normal Kalman updates can't bridge a multi-metre gap (e.g. robot
@@ -453,6 +485,8 @@ public class VisionSubsystem extends SubsystemBase {
         // Vision ghost: parks off-field when stale or absent
         if (m_lastVisionPose != null && (now - m_lastVisionTimeS) < GHOST_FADE_S) {
             Logger.recordOutput("Drive/VisionPose", m_lastVisionPose);
+            // StructPublisher: latest accepted vision pose for AdvantageScope 3D field view
+            m_visionPosePublisher.set(new Pose3d(m_lastVisionPose));
         } else {
             Logger.recordOutput("Drive/VisionPose", new Pose2d(-10, -10, new Rotation2d()));
         }
