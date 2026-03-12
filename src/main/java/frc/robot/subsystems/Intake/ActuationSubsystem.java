@@ -7,12 +7,13 @@ import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class ActuationSubsystem extends SubsystemBase {
 
     // Hardware Constants
-    private static final int MOTOR_ID = 43;
+    private static final int MOTOR_ID = 26;
     
     // Motion Magic settings (Phoenix 6 uses Rotations, not Ticks)
     private static final double CRUISE_VELOCITY = 100; // rotations/sec
@@ -29,13 +30,13 @@ public class ActuationSubsystem extends SubsystemBase {
         TalonFXConfiguration config = new TalonFXConfiguration();
 
         // 1. Motor Output & Neutral Mode
-        config.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
+        config.MotorOutput.Inverted = InvertedValue.Clockwise_Positive;
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
 
         // 2. Soft Limits (Hard limits replacement)
         // Adjust these numbers based on your mechanism's physical range
         config.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
-        config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = 50; // Rotations
+        config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = 11.5; // Rotations
         config.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
         config.SoftwareLimitSwitch.ReverseSoftLimitThreshold = 0;  // Rotations
 
@@ -88,6 +89,6 @@ public class ActuationSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // This runs every 20ms. Useful for logging or dashboard updates.
+        SmartDashboard.putNumber("Intake/ExtendPosition", actuationMotor.getPosition().getValueAsDouble());
     }
 }

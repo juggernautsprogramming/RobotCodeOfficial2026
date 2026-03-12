@@ -1,8 +1,9 @@
 package frc.robot.subsystems.Feeder;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
@@ -22,17 +23,17 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
  */
 public class FeederSubsystem extends SubsystemBase {
 
-    private static final int    MOTOR_ID         = 44;
-    private static final String CAN_BUS          = "ChassisCAN";
+    private static final int    MOTOR_ID         = 25;
+    private static final String CAN_BUS          = "rio";
     private static final double CRUISE_VELOCITY  = 100;
     private static final double ACCELERATION     = 200;
 
-    private final TalonFX      feederMotor;
-    private final DutyCycleOut dutyCycleRequest = new DutyCycleOut(0);
+    private final TalonFX    feederMotor;
+    private final VoltageOut voltageRequest = new VoltageOut(0);
 
     public FeederSubsystem() {
         // FIX: use CANBus object instead of deprecated TalonFX(int, String)
-        feederMotor = new TalonFX(MOTOR_ID, new String(CAN_BUS));
+        feederMotor = new TalonFX(MOTOR_ID, new CANBus(CAN_BUS));
 
         TalonFXConfiguration config = new TalonFXConfiguration();
         config.MotorOutput.Inverted    = InvertedValue.CounterClockwise_Positive;
@@ -59,9 +60,9 @@ public class FeederSubsystem extends SubsystemBase {
         feederMotor.setPosition(0);
     }
 
-    /** Set motor power using Duty Cycle (-1.0 to 1.0). */
-    public void setPower(double power) {
-        feederMotor.setControl(dutyCycleRequest.withOutput(power));
+    /** Set motor voltage (-12.0 to 12.0). */
+    public void setPower(double volts) {
+        feederMotor.setControl(voltageRequest.withOutput(volts));
     }
 
     public void stop() { feederMotor.stopMotor(); }

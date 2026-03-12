@@ -263,6 +263,11 @@ public class RobotContainer {
 
         // ── Operator (port 1) ─────────────────────────────────────────────────
 
+        // Default: always retract intake when not actively toggled
+        actuationSubsystem.setDefaultCommand(
+            Commands.run(() -> actuationSubsystem.setPosition(0.0), actuationSubsystem)
+        );
+
         // A: Toggle intake — deploy + spin roller  ↔  stow + stop
         m_playerStick.a().toggleOnTrue(
             Commands.startEnd(
@@ -275,7 +280,7 @@ public class RobotContainer {
         // B: Toggle feeder — run forward  ↔  stop
         m_playerStick.b().toggleOnTrue(
             Commands.startEnd(
-                () -> feederSubsystem.setPower(0.8),
+                () -> feederSubsystem.setPower(5.0),
                 feederSubsystem::stop,
                 feederSubsystem
             )
@@ -318,9 +323,13 @@ public class RobotContainer {
             Commands.run(intakeAdapter::eject, actuationSubsystem, uptakeSubsystem)
         );
 
-        // Right Bumper: Reverse feeder (hold)
-        m_playerStick.rightBumper().whileTrue(
-            Commands.run(() -> feederSubsystem.setPower(-0.5), feederSubsystem)
+        // Right Bumper: Reverse feeder (toggle)
+        m_playerStick.rightBumper().toggleOnTrue(
+            Commands.startEnd(
+                () -> feederSubsystem.setPower(-3.0),
+                feederSubsystem::stop,
+                feederSubsystem
+            )
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────

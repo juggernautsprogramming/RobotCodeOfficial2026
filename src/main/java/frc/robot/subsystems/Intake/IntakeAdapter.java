@@ -15,7 +15,7 @@ package frc.robot.subsystems.Intake;
 public class IntakeAdapter {
 
     // ── Tune these to your mechanism ──────────────────────────────────────────
-    private static final double DEPLOYED_ROTATIONS = 30.0; // actuation arm out
+    private static final double DEPLOYED_ROTATIONS = 11.33; // actuation arm out
     private static final double STOWED_ROTATIONS   =  0.0; // actuation arm in
     private static final double ROLLER_POWER       =  0.8; // uptake roller speed
 
