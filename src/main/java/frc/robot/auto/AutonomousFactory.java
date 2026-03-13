@@ -15,42 +15,24 @@ import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Intake.ActuationSubsystem;
 import frc.robot.subsystems.Intake.IntakeAdapter;
+import frc.robot.subsystems.Intake.IntakeRollerSubsystem;
 import frc.robot.subsystems.Intake.UptakeSubsystem;
 import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Shooter.ShotCalculator;
 import frc.robot.subsystems.Vision.VisionSubsystem;
 
 /**
- * AutonomousFactory — builds Left, Center, and Right 8-ball autonomous routines
+ * AutonomousFactory — builds Left, Center, and Right autonomous routines
  * and registers them on a SmartDashboard {@link SendableChooser}.
- *
- * <h2>Sequence (all three positions)</h2>
- * <pre>
- *  Reset pose
- *  → Drive to Shoot Zone 1  (flywheel pre-spins in parallel)
- *  → Shoot × 3 preloaded balls
- *  → Drive to Pickup Zone   (intake running during drive)
- *  → Intake safety catch    (max 3 s)
- *  → Drive to Shoot Zone 2  (flywheel pre-spins in parallel)
- *  → SnapHeadingToTag align (max 2.5 s) then shoot × 5
- *  → Idle cleanup
- * </pre>
- *
- * <h2>PathPlanner paths required</h2>
- * Place in {@code src/main/deploy/pathplanner/paths/}:
- * Center_StartToShoot.path, Center_ShootToPickup.path, Center_PickupToShoot2.path,
- * Left_StartToShoot.path, Left_ShootToPickup.path, Left_PickupToShoot2.path,
- * Right_StartToShoot.path, Right_ShootToPickup.path, Right_PickupToShoot2.path
  */
 public class AutonomousFactory {
 
     // ── PathPlanner motion constraints ────────────────────────────────────────
-    // Defined inline here — no dependency on AutoConstants fields.
     private static final PathConstraints CONSTRAINTS = new PathConstraints(
-        2.0,                            // max velocity m/s
-        2.5,                            // max acceleration m/s²
-        Units.degreesToRadians(360.0),  // max angular velocity rad/s
-        Units.degreesToRadians(720.0)   // max angular acceleration rad/s²
+        2.0,
+        2.5,
+        Units.degreesToRadians(360.0),
+        Units.degreesToRadians(720.0)
     );
 
     // ── Dependencies ──────────────────────────────────────────────────────────
@@ -58,6 +40,7 @@ public class AutonomousFactory {
     private final ShooterSubsystem        m_shooter;
     private final ActuationSubsystem      m_actuation;
     private final UptakeSubsystem         m_uptake;
+    private final IntakeRollerSubsystem   m_rollers;
     private final VisionSubsystem         m_vision;
     private final IntakeAdapter           m_intake;
 
@@ -70,6 +53,7 @@ public class AutonomousFactory {
      * @param shooter    Shooter subsystem.
      * @param actuation  Arm deployment motor (CAN ID 43).
      * @param uptake     Intake roller motor (CAN ID 42).
+     * @param rollers    Intake bar motors (CAN IDs 27 & 28).
      * @param vision     VisionSubsystem passed to SnapHeadingToTag.
      */
     public AutonomousFactory(
@@ -77,13 +61,15 @@ public class AutonomousFactory {
             ShooterSubsystem        shooter,
             ActuationSubsystem      actuation,
             UptakeSubsystem         uptake,
+            IntakeRollerSubsystem   rollers,
             VisionSubsystem         vision) {
         m_drivetrain = drivetrain;
         m_shooter    = shooter;
         m_actuation  = actuation;
         m_uptake     = uptake;
+        m_rollers    = rollers;
         m_vision     = vision;
-        m_intake     = new IntakeAdapter(actuation, uptake);
+        m_intake     = new IntakeAdapter(m_actuation, m_uptake, m_rollers);
 
         registerNamedCommands();
         buildAndRegister();
@@ -91,29 +77,14 @@ public class AutonomousFactory {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Returns the SmartDashboard chooser. Pass to Shuffleboard/Elastic. */
+    /** Returns the SmartDashboard chooser. */
     public SendableChooser<Command> getChooser() { return m_chooser; }
 
     /** Returns the currently selected autonomous command. */
     public Command getSelected() { return m_chooser.getSelected(); }
 
-    // ── Registration ──────────────────────────────────────────────────────────
+    // ── Named commands ────────────────────────────────────────────────────────
 
-    // ── Named commands for PathPlanner GUI ───────────────────────────────────
-
-    /**
-     * Registers all robot actions as named commands so they can be placed as
-     * event markers inside PathPlanner's GUI auto editor.
-     *
-     * Available names (use these exact strings in the PathPlanner app):
-     *   "SpinUpFlywheel"  — set flywheel to optimal RPM and hood angle
-     *   "IdleFlywheel"    — return flywheel to idle speed
-     *   "ShootPreloads"   — fire the 3 preloaded balls
-     *   "ShootPickups"    — fire the 5 picked-up balls
-     *   "StartIntake"     — deploy arm and run intake roller
-     *   "StopIntake"      — retract arm and stop intake roller
-     *   "AlignToTag"      — rotate to nearest AprilTag (max 2.5 s)
-     */
     private void registerNamedCommands() {
         double optRPM     = ShotCalculator.OPTIMAL_SHOT.rpm();
         double optHoodDeg = ShotCalculator.OPTIMAL_SHOT.hoodDeg();
@@ -133,10 +104,10 @@ public class AutonomousFactory {
             new ShootNBallsCommand(m_shooter, AutoStartConstants.PICKUP_BALL_COUNT, optRPM));
 
         NamedCommands.registerCommand("StartIntake",
-            new InstantCommand(m_intake::run, m_actuation, m_uptake));
+            new InstantCommand(m_intake::run, m_actuation, m_uptake, m_rollers));
 
         NamedCommands.registerCommand("StopIntake",
-            new InstantCommand(m_intake::stop, m_actuation, m_uptake));
+            new InstantCommand(m_intake::stop, m_actuation, m_uptake, m_rollers));
 
         NamedCommands.registerCommand("AlignToTag",
             new SnapHeadingToTag(m_drivetrain, m_vision, () -> 0.0, () -> 0.0)
@@ -144,10 +115,8 @@ public class AutonomousFactory {
     }
 
     private void buildAndRegister() {
-        // Safe default — does nothing if no auto is selected
         m_chooser.setDefaultOption("Do Nothing", Commands.none());
 
-        // Load every .auto file from deploy/pathplanner/autos/ automatically
         for (String name : AutoBuilder.getAllAutoNames()) {
             m_chooser.addOption(name, AutoBuilder.buildAuto(name));
         }

@@ -38,7 +38,7 @@ public class TunerConstants {
     private static final ClosedLoopOutputType kSteerClosedLoopOutput = ClosedLoopOutputType.Voltage;
     // The closed-loop output type to use for the drive motors;
     // This affects the PID/FF gains for the drive motors
-    private static final ClosedLoopOutputType kDriveClosedLoopOutput = ClosedLoopOutputType.Voltage;
+   private static final ClosedLoopOutputType kDriveClosedLoopOutput = ClosedLoopOutputType.TorqueCurrentFOC;
 
     // The type of motor used for the drive motor
     private static final DriveMotorArrangement kDriveMotorType = DriveMotorArrangement.TalonFX_Integrated;
@@ -51,19 +51,32 @@ public class TunerConstants {
 
     // The stator current at which the wheels start to slip;
     // This needs to be tuned to your individual robot
-    private static final Current kSlipCurrent = Amps.of(120);
+    private static final Current kSlipCurrent = Amps.of(80); // was 120
 
     // Initial configs for the drive and steer motors and the azimuth encoder; these cannot be null.
     // Some configs will be overwritten; check the `with*InitialConfigs()` API documentation.
-    private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration();
+    private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration()
+    .withCurrentLimits(
+        new CurrentLimitsConfigs()
+            .withStatorCurrentLimit(Amps.of(60))
+            .withStatorCurrentLimitEnable(true)
+            .withSupplyCurrentLimit(Amps.of(40))
+            .withSupplyCurrentLimitEnable(true)
+    )
+    .withClosedLoopRamps(
+        new ClosedLoopRampsConfigs()
+            .withVoltageClosedLoopRampPeriod(0.1)
+    );
     private static final TalonFXConfiguration steerInitialConfigs = new TalonFXConfiguration()
-        .withCurrentLimits(
-            new CurrentLimitsConfigs()
-                // Swerve azimuth does not require much torque output, so we can set a relatively low
-                // stator current limit to help avoid brownouts without impacting performance.
-                .withStatorCurrentLimit(Amps.of(60))
-                .withStatorCurrentLimitEnable(true)
-        );
+    .withCurrentLimits(
+        new CurrentLimitsConfigs()
+            .withStatorCurrentLimit(Amps.of(60))
+            .withStatorCurrentLimitEnable(true)
+    )
+    .withClosedLoopGeneral(
+        new ClosedLoopGeneralConfigs()
+            .withContinuousWrap(true)  // ← THIS is the fix
+    );
     private static final CANcoderConfiguration encoderInitialConfigs = new CANcoderConfiguration();
     // Configs for the Pigeon 2; leave this null to skip applying Pigeon 2 configs
     private static final Pigeon2Configuration pigeonConfigs = null;
