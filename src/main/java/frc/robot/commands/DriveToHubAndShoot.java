@@ -81,8 +81,8 @@ public class DriveToHubAndShoot extends Command {
     private static final double MAX_RUNTIME_S = 8.0;
 
     // ── Optimal scoring zone (±0.25 m around the physics-derived standoff) ───
-    private static final double ZONE_MIN_M = ShotCalculator.OPTIMAL_STANDOFF_M - 0.25;
-    private static final double ZONE_MAX_M = ShotCalculator.OPTIMAL_STANDOFF_M + 0.25;
+    private static final double ZONE_MIN_M = ShotCalculator.OPTIMAL_STANDOFF_FIXED_M - 0.25;
+    private static final double ZONE_MAX_M = ShotCalculator.OPTIMAL_STANDOFF_FIXED_M + 0.25;
 
     // ── Re-approach trigger: if we drift this far past the zone boundary ──────
     private static final double DRIFT_THRESHOLD_M = 0.5;
@@ -152,7 +152,7 @@ public class DriveToHubAndShoot extends Command {
             robotPose.getTranslation(), HUB,
             speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
 
-        ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
+        ShotCalculator.ShotResult shot = ShotCalculator.calculateFixed(comp.virtualDistanceMeters());
         m_targetRPM     = shot.rpm();
         m_targetHoodDeg = shot.hoodDeg();
 
@@ -162,7 +162,7 @@ public class DriveToHubAndShoot extends Command {
 
         // ── 3. Rotation + range alignment ────────────────────────────────────
         HubAlignController.DriveOutput driveOut =
-            m_alignCtrl.compute(m_drivetrain, HUB, ShotCalculator.OPTIMAL_STANDOFF_M);
+            m_alignCtrl.compute(m_drivetrain, HUB, ShotCalculator.OPTIMAL_STANDOFF_FIXED_M);
 
         boolean inZone = distToHub >= ZONE_MIN_M && distToHub <= ZONE_MAX_M;
 
@@ -236,7 +236,7 @@ public class DriveToHubAndShoot extends Command {
         double elapsed = Timer.getFPGATimestamp() - m_startTimeS;
         SmartDashboard.putString ("DTHS2/State",        m_state.name());
         SmartDashboard.putNumber ("DTHS2/DistToHub_m",  distToHub);
-        SmartDashboard.putNumber ("DTHS2/DistError_m",  distToHub - ShotCalculator.OPTIMAL_STANDOFF_M);
+        SmartDashboard.putNumber ("DTHS2/DistError_m",  distToHub - ShotCalculator.OPTIMAL_STANDOFF_FIXED_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMin_m",    ZONE_MIN_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMax_m",    ZONE_MAX_M);
         SmartDashboard.putNumber ("DTHS2/TargetRPM",    m_targetRPM);

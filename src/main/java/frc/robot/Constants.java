@@ -142,26 +142,41 @@ public final class Constants {
         public static final String CAMERA_BACK_RIGHT = "Camera-BackRight";
         /** Name used in PhotonVision UI for the rear-left camera. */
         public static final String CAMERA_BACK_LEFT  = "Camera-BackLeft";
+        /** Name used in PhotonVision UI for the front camera (faces forward). */
+        public static final String CAMERA_FRONT      = "Camera-Front";
 
         /**
          * All camera offsets keyed by camera name.
-         * Transform3d is robot-center → camera (forward=+X, left=+Y, up=+Z).
-         * Adjust translations/rotations to match your actual mounting.
+         * Transform3d is robot-center -> camera lens (forward=+X, left=+Y, up=+Z).
+         * Yaw convention: 0=forward, 90=left, 180=back.
+         * Pitch convention: negative = lens tilted downward from horizontal.
+         *
+         * Measured values (all heights from floor):
+         *   Camera-Front     : 20 3/8" high, faces forward, centered, ~20° down tilt
+         *   Camera-BackLeft  : 21" high, 10.3" left of center, faces left,  7° down tilt
+         *   Camera-BackRight : 21" high, 10.3" right of center, faces back, 15° down tilt
          */
         public static final Map<String, Transform3d> kCameraOffsets = Map.of(
             CAMERA_BACK_RIGHT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(10),    // 10" behind robot center
-                    Units.inchesToMeters(10),    // 10" to the right
-                    Units.inchesToMeters(20)),   // 20" above floor
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(90))
+                    Units.inchesToMeters(-10),     // ~10" behind robot center (estimate)
+                    Units.inchesToMeters(-10.3),   // 10.3" to the right
+                    Units.inchesToMeters(21)),      // 21" above floor
+                new Rotation3d(0, Units.degreesToRadians(-15), Units.degreesToRadians(180)) // faces back, 15° down
             ),
             CAMERA_BACK_LEFT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(-10),   // 10" behind robot center
-                    Units.inchesToMeters(10),    // 10" to the left
-                    Units.inchesToMeters(20)),   // 20" above floor
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(285))
+                    Units.inchesToMeters(-10),     // ~10" behind robot center (estimate)
+                    Units.inchesToMeters(10.3),    // 10.3" to the left
+                    Units.inchesToMeters(21)),      // 21" above floor
+                new Rotation3d(0, Units.degreesToRadians(-7), Units.degreesToRadians(90))   // faces left, 7° down
+            ),
+            CAMERA_FRONT, new Transform3d(
+                new Translation3d(
+                    Units.inchesToMeters(12),      // ~12" forward of robot center (estimate)
+                    Units.inchesToMeters(0),       // centered
+                    Units.inchesToMeters(20.375)), // 20 3/8" above floor
+                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(0))   // faces forward, 20° down
             )
         );
 
@@ -281,14 +296,14 @@ public final class Constants {
          * Height of the hub opening above the floor (metres).
          * Measure from the 2026 game manual or physical field.
          */
-        public static final double HUB_TARGET_HEIGHT_METERS = 2.64;
+        public static final double HUB_TARGET_HEIGHT_METERS = 1.26;  // H2 from frc_v0_calculator.html
 
         /** AprilTag IDs attached to the hub. Verify against 2026 game manual. */
         public static final int[] HUB_APRIL_TAG_IDS = {8, 9, 11, 19};
 
         // ── Shooter mechanism geometry ────────────────────────────────────────
         /** Height of the game-piece exit point above the floor (metres). */
-        public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.52;
+        public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.60;  // H1 from frc_v0_calculator.html
         /** Horizontal offset from robot centre to shooter exit (metres). */
         public static final double SHOOTER_X_OFFSET_METERS    = 0.20;
 
@@ -328,8 +343,10 @@ public final class Constants {
         public static final double PIVOT_ANGLE_TOLERANCE_DEG = 1.0;
 
         // ── Shot angle optimizer ──────────────────────────────────────────────
-        public static final double MIN_LAUNCH_ANGLE_DEG = 20.0;
-        public static final double MAX_LAUNCH_ANGLE_DEG = 75.0;
+        public static final double MIN_LAUNCH_ANGLE_DEG   = 20.0;
+        public static final double MAX_LAUNCH_ANGLE_DEG   = 75.0;
+        /** Fixed launch angle used by the frc_v0_calculator.html physics model. */
+        public static final double FIXED_LAUNCH_ANGLE_DEG = 61.5;
         /** Sweep resolution (degrees). Smaller = more precise, slightly more startup CPU. */
         public static final double ANGLE_SWEEP_STEP_DEG = 0.5;
         /**

@@ -52,29 +52,31 @@ public final class ShotCalculator {
     private static final double ETA          = ShooterConstants.EFFICIENCY;
     private static final double GEAR_RATIO   = ShooterConstants.SHOOTER_GEAR_RATIO;
 
+    // ── Fixed-angle constants (from frc_v0_calculator.html) ──────────────────
+    private static final double FIXED_THETA_DEG = ShooterConstants.FIXED_LAUNCH_ANGLE_DEG;
+
     // ── Precomputed optimal standoff ──────────────────────────────────────────
 
     /**
-     * The standoff distance (metres, hub centre → robot centre) that yields the
-     * highest scoring shot given the robot's hardware.
-     *
-     * <p>Computed once at class load by sweeping
-     * [{@link ShooterConstants#OPTIMAL_DIST_MIN_M},
-     *  {@link ShooterConstants#OPTIMAL_DIST_MAX_M}] in
-     *  {@link ShooterConstants#OPTIMAL_DIST_STEP_M} increments.
-     * Use this in your drive commands instead of the hardcoded constant.
+     * The standoff distance (metres, hub centre -> robot centre) that yields the
+     * highest scoring shot given the robot's hardware (variable-angle sweep).
      */
     public static final double OPTIMAL_STANDOFF_M;
 
-    /**
-     * The shot parameters at {@link #OPTIMAL_STANDOFF_M}.
-     * Contains the optimal hood angle, RPM, and entry angle for the best position.
-     */
+    /** The shot parameters at {@link #OPTIMAL_STANDOFF_M}. */
     public static final ShotResult OPTIMAL_SHOT;
 
+    /**
+     * Optimal standoff distance for the fixed 61.5° launch angle model
+     * (exact frc_v0_calculator.html physics, no efficiency correction).
+     */
+    public static final double OPTIMAL_STANDOFF_FIXED_M;
+
+    /** Shot parameters at {@link #OPTIMAL_STANDOFF_FIXED_M} using fixed 61.5°. */
+    public static final ShotResult OPTIMAL_SHOT_FIXED;
+
     static {
-        // Sweep distances and pick the one whose best angle gives the highest score.
-        // All work is done at class load — no per-loop cost.
+        // Variable-angle sweep — picks the distance+angle with the highest weighted score
         double bestDist  = (ShooterConstants.OPTIMAL_DIST_MIN_M + ShooterConstants.OPTIMAL_DIST_MAX_M) / 2.0;
         double bestScore = -1.0;
 
@@ -91,14 +93,29 @@ public final class ShotCalculator {
         OPTIMAL_STANDOFF_M = bestDist;
         OPTIMAL_SHOT       = calculate(OPTIMAL_STANDOFF_M);
 
-        // Log to console so the driver station shows the result at startup
+        // Fixed-angle (61.5°) sweep — identical physics to HTML calculator
+        double bestFixedDist  = (ShooterConstants.OPTIMAL_DIST_MIN_M + ShooterConstants.OPTIMAL_DIST_MAX_M) / 2.0;
+        double bestFixedScore = -1.0;
+
+        for (double d = ShooterConstants.OPTIMAL_DIST_MIN_M;
+                   d <= ShooterConstants.OPTIMAL_DIST_MAX_M;
+                   d += ShooterConstants.OPTIMAL_DIST_STEP_M) {
+            ShotResult r = calculateFixed(d);
+            if (r != null && r.score() > bestFixedScore) {
+                bestFixedScore = r.score();
+                bestFixedDist  = d;
+            }
+        }
+
+        OPTIMAL_STANDOFF_FIXED_M = bestFixedDist;
+        OPTIMAL_SHOT_FIXED       = calculateFixed(OPTIMAL_STANDOFF_FIXED_M);
+
         System.out.printf(
-            "[ShotCalculator] Optimal standoff: %.2f m | hood: %.1f° | RPM: %.0f | entry: %.1f° | score: %.3f%n",
-            OPTIMAL_STANDOFF_M,
-            OPTIMAL_SHOT.hoodDeg(),
-            OPTIMAL_SHOT.rpm(),
-            OPTIMAL_SHOT.entryAngle(),
-            OPTIMAL_SHOT.score());
+            "[ShotCalculator] Variable-angle optimal: %.2f m | hood: %.1f° | RPM: %.0f%n",
+            OPTIMAL_STANDOFF_M, OPTIMAL_SHOT.hoodDeg(), OPTIMAL_SHOT.rpm());
+        System.out.printf(
+            "[ShotCalculator] Fixed-angle  optimal:  %.2f m | hood: %.1f° | RPM: %.0f%n",
+            OPTIMAL_STANDOFF_FIXED_M, OPTIMAL_SHOT_FIXED.hoodDeg(), OPTIMAL_SHOT_FIXED.rpm());
     }
 
     private ShotCalculator() {} // static-only utility class
@@ -217,6 +234,40 @@ public final class ShotCalculator {
         double mRPM  = toMotorRPM(p.v0);
         double score = scoreAngle(p, mRPM);
         return new ShotResult(mRPM, thetaDeg, p.v0, p.flightTime, p.entryAngle, score);
+    }
+
+    /**
+     * Fixed-angle shot calculation — exact port of the HTML {@code compute()} function.
+     *
+     * <p>Uses {@link ShooterConstants#FIXED_LAUNCH_ANGLE_DEG} (61.5°) and converts
+     * exit speed to RPM with no efficiency correction, matching the HTML RPM tab exactly:
+     * <pre>
+     *   v₀  = d × √( g / ( 2·cos²θ · (d·tanθ − ΔH) ) )
+     *   RPM = v₀ × 60 / (π × wheelDiameter)
+     * </pre>
+     *
+     * @param distanceMeters Horizontal distance from shooter exit to hub (metres).
+     * @return ShotResult for the fixed angle, or a safe fallback if physics are invalid.
+     */
+    public static ShotResult calculateFixed(double distanceMeters) {
+        double d  = MathUtil.clamp(distanceMeters, 0.5, 8.0);
+        Physics p = solvePhysics(d, FIXED_THETA_DEG);
+        if (p == null) {
+            return new ShotResult(ShooterConstants.IDLE_RPM, FIXED_THETA_DEG, 0, 0, 0, 0.0);
+        }
+        double mRPM  = toWheelRPMFixed(p.v0);
+        double score = scoreAngle(p, mRPM);
+        return new ShotResult(mRPM, FIXED_THETA_DEG, p.v0, p.flightTime, p.entryAngle, score);
+    }
+
+    /**
+     * RPM conversion matching the HTML RPM tab exactly — no efficiency factor.
+     * <pre>
+     *   RPM = v₀ × 60 / (π × wheelDiameter)
+     * </pre>
+     */
+    private static double toWheelRPMFixed(double v0) {
+        return v0 * 60.0 / (Math.PI * WHEEL_DIAM_M);
     }
 
     // ── Internal physics solver ───────────────────────────────────────────────

@@ -7,11 +7,13 @@ import com.pathplanner.lib.path.PathPlannerPath;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.*;
 
 import frc.robot.Constants.AutoStartConstants;
+import frc.robot.Constants.VisionConstants;
 import frc.robot.commands.RunIntakeCommand;
 import frc.robot.commands.ShootNBallsCommand;
 import frc.robot.commands.SnapHeadingToTag;
@@ -102,37 +104,54 @@ public class AutonomousFactory {
     // ── Registration ──────────────────────────────────────────────────────────
 
     private void buildAndRegister() {
+        // Start poses are resolved at command runtime (inside InstantCommand lambdas)
+        // so the alliance is known by the time auto is enabled.
         m_chooser.setDefaultOption("Center Auto (8 balls)",
             buildSequence("Center",
-                new Pose2d(AutoStartConstants.CENTER_START_X,
-                           AutoStartConstants.CENTER_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.CENTER_START_HDG))));
+                AutoStartConstants.CENTER_START_X,
+                AutoStartConstants.CENTER_START_Y,
+                AutoStartConstants.CENTER_START_HDG));
 
         m_chooser.addOption("Left Auto (8 balls)",
             buildSequence("Left",
-                new Pose2d(AutoStartConstants.LEFT_START_X,
-                           AutoStartConstants.LEFT_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.LEFT_START_HDG))));
+                AutoStartConstants.LEFT_START_X,
+                AutoStartConstants.LEFT_START_Y,
+                AutoStartConstants.LEFT_START_HDG));
 
         m_chooser.addOption("Right Auto (8 balls)",
             buildSequence("Right",
-                new Pose2d(AutoStartConstants.RIGHT_START_X,
-                           AutoStartConstants.RIGHT_START_Y,
-                           Rotation2d.fromDegrees(AutoStartConstants.RIGHT_START_HDG))));
+                AutoStartConstants.RIGHT_START_X,
+                AutoStartConstants.RIGHT_START_Y,
+                AutoStartConstants.RIGHT_START_HDG));
 
         SmartDashboard.putData("Auto Chooser", m_chooser);
     }
 
     // ── Sequence builder ──────────────────────────────────────────────────────
 
-    private Command buildSequence(String label, Pose2d startPose) {
+    /**
+     * @param blueStartX   Blue-alliance start X (metres from blue wall).
+     * @param startY       Start Y — same for both alliances (hub is centred in Y).
+     * @param blueStartHdg Blue-alliance start heading (degrees). Mirrored for red.
+     */
+    private Command buildSequence(String label,
+                                  double blueStartX,
+                                  double startY,
+                                  double blueStartHdg) {
 
-        double optRPM     = ShotCalculator.OPTIMAL_SHOT.rpm();
-        double optHoodDeg = ShotCalculator.OPTIMAL_SHOT.hoodDeg();
+        double optRPM     = ShotCalculator.OPTIMAL_SHOT_FIXED.rpm();
+        double optHoodDeg = ShotCalculator.OPTIMAL_SHOT_FIXED.hoodDeg();
 
-        // Phase 0: Seed odometry
-        Command resetPose = new InstantCommand(
-            () -> m_drivetrain.resetPose(startPose));
+        // Phase 0: Seed odometry — start pose computed at runtime so alliance is known.
+        // Red alliance: mirror X around field centre; heading = 180° − blueHdg.
+        Command resetPose = new InstantCommand(() -> {
+            boolean isRed = DriverStation.getAlliance()
+                .orElse(DriverStation.Alliance.Blue) == DriverStation.Alliance.Red;
+            double startX   = isRed ? VisionConstants.FIELD_LENGTH_M - blueStartX : blueStartX;
+            double startHdg = isRed ? 180.0 - blueStartHdg : blueStartHdg;
+            m_drivetrain.resetPose(
+                new Pose2d(startX, startY, Rotation2d.fromDegrees(startHdg)));
+        });
 
         // Phase 1: Drive to first shoot zone (~2 m forward) + pre-spin flywheel
         Command driveToShot1 = new ParallelCommandGroup(

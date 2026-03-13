@@ -34,8 +34,8 @@ public class DriveToHubAndShootCommand extends Command {
     private static final double HOLD_TIME_S      = 0.10;
     private static final double DRIFT_THRESHOLD_M = 0.5;
 
-    private static final double ZONE_MIN_M = ShotCalculator.OPTIMAL_STANDOFF_M - 0.25;
-    private static final double ZONE_MAX_M = ShotCalculator.OPTIMAL_STANDOFF_M + 0.25;
+    private static final double ZONE_MIN_M = ShotCalculator.OPTIMAL_STANDOFF_FIXED_M - 0.25;
+    private static final double ZONE_MAX_M = ShotCalculator.OPTIMAL_STANDOFF_FIXED_M + 0.25;
 
     private static final Translation2d HUB = ShooterConstants.HUB_CENTER;
 
@@ -95,8 +95,8 @@ public class DriveToHubAndShootCommand extends Command {
             currentPose.getY() - HUB.getY(),
             currentPose.getX() - HUB.getX());
 
-        double targetX = HUB.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad);
-        double targetY = HUB.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad);
+        double targetX = HUB.getX() + ShotCalculator.OPTIMAL_STANDOFF_FIXED_M * Math.cos(bearingRad);
+        double targetY = HUB.getY() + ShotCalculator.OPTIMAL_STANDOFF_FIXED_M * Math.sin(bearingRad);
 
         // Robot must face the hub (opposite of bearing)
         Rotation2d targetHeading = new Rotation2d(bearingRad + Math.PI);
@@ -141,7 +141,7 @@ public class DriveToHubAndShootCommand extends Command {
             new Translation2d(shooterX, shooterY), alignTarget,
             speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
 
-        ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
+        ShotCalculator.ShotResult shot = ShotCalculator.calculateFixed(comp.virtualDistanceMeters());
         m_targetRPM     = shot.rpm();
         m_targetHoodDeg = shot.hoodDeg();
 
@@ -151,7 +151,7 @@ public class DriveToHubAndShootCommand extends Command {
 
         // Rotation output from HubAlignController (ProfiledPID toward tag/hub)
         HubAlignController.DriveOutput alignOut =
-            m_alignCtrl.compute(m_drivetrain, alignTarget, ShotCalculator.OPTIMAL_STANDOFF_M);
+            m_alignCtrl.compute(m_drivetrain, alignTarget, ShotCalculator.OPTIMAL_STANDOFF_FIXED_M);
 
         boolean inZone = distToHub >= ZONE_MIN_M && distToHub <= ZONE_MAX_M;
 
@@ -217,8 +217,8 @@ public class DriveToHubAndShootCommand extends Command {
                     double bearingRad = Math.atan2(
                         robotPose.getY() - alignTarget.getY(),
                         robotPose.getX() - alignTarget.getX());
-                    m_xController.setGoal(alignTarget.getX() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.cos(bearingRad));
-                    m_yController.setGoal(alignTarget.getY() + ShotCalculator.OPTIMAL_STANDOFF_M * Math.sin(bearingRad));
+                    m_xController.setGoal(alignTarget.getX() + ShotCalculator.OPTIMAL_STANDOFF_FIXED_M * Math.cos(bearingRad));
+                    m_yController.setGoal(alignTarget.getY() + ShotCalculator.OPTIMAL_STANDOFF_FIXED_M * Math.sin(bearingRad));
                     m_state = State.DRIVING;
                     m_allGreenStartS = Double.NaN;
                 }
@@ -243,7 +243,7 @@ public class DriveToHubAndShootCommand extends Command {
         double elapsed = Timer.getFPGATimestamp() - m_startTimeS;
         SmartDashboard.putString ("DTHS2/State",       m_state.name());
         SmartDashboard.putNumber ("DTHS2/DistToHub_m", distToHub);
-        SmartDashboard.putNumber ("DTHS2/DistError_m", distToHub - ShotCalculator.OPTIMAL_STANDOFF_M);
+        SmartDashboard.putNumber ("DTHS2/DistError_m", distToHub - ShotCalculator.OPTIMAL_STANDOFF_FIXED_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMin_m",   ZONE_MIN_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMax_m",   ZONE_MAX_M);
         SmartDashboard.putNumber ("DTHS2/TargetRPM",   m_targetRPM);
