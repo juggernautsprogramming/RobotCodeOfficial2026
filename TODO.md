@@ -1,13 +1,9 @@
-# Robot Shoot Control Implementation
+  # Robot Operator Shoot Button TODO
+Status: Completed ✅
 
-## Plan Steps
-- [x] 1. Create this TODO.md
-- [x] 2. Edit RobotContainer.java: Add shootCommand ParallelCommands for feeder + shooter optimal
-- [x] 3. Add LT binding: m_playerStick.leftTrigger().whileTrue(shootCommand)
-- [x] 4. Build & deploy
-- [ ] 5. Test in sim/real: Hold LT → feeder 5.0 + shooter optimal; release → stop
-- [ ] 6. Tune constants if needed (feeder power, RPM)
-- [ ] 7. attempt_completion
-
-Progress: Starting edits.
+## Steps:
+1. [x] Edit src/main/java/frc/robot/RobotContainer.java: Replace LT binding with continuous shoot + feeder. ✓
+2. [x] gradlew build & test compile: BUILD SUCCESSFUL. ✓
+3. [ ] Deploy/test on robot: LT hold for shoot/feed, release to stop.
+4. [x] Complete: attempt_completion.
 

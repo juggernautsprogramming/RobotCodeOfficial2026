@@ -302,14 +302,29 @@ public class RobotContainer {
             )
         );
 
-        // Left Trigger: Climber up (hold), hold position on release
-        m_playerStick.leftTrigger().whileTrue(
-            Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
+        // Left Trigger: Continuous simple shoot (spin shooter + feeder until released), low climb hold on release
+        m_playerStick.leftTrigger(0.1).whileTrue(
+            Commands.parallel(
+                // Spin shooter to optimal fixed shot (no vision/aim) + continuous shoot flag
+                Commands.runOnce(() -> {
+                    shooterSubsystem.setFlywheelRPM(ShotCalculator.OPTIMAL_SHOT_FIXED.rpm());
+                    shooterSubsystem.setLaunchAngleDeg(ShotCalculator.OPTIMAL_SHOT_FIXED.hoodDeg());
+                }, shooterSubsystem).andThen(
+                    Commands.run(shooterSubsystem::shoot, shooterSubsystem)
+                ),
+                // Run feeder forward continuously while shooting
+                Commands.run(() -> feederSubsystem.setPower(5.0), feederSubsystem),
+                // Low climb power while shooting (increase if priority, or replace with Commands.none())
+                Commands.run(() -> climberSubsystem.setPowerLevel(0.1), climberSubsystem)
+            )
         ).onFalse(
             Commands.runOnce(() -> {
+                shooterSubsystem.idleFlywheel();
+                feederSubsystem.stop();
+                // Hold climber position
                 double pos = climberSubsystem.getCurrentPosition();
                 climberSubsystem.setPositionDegrees(pos * 360.0);
-            }, climberSubsystem)
+            }, shooterSubsystem, feederSubsystem, climberSubsystem)
         );
 
         // Right Trigger: Climber down (hold), hold position on release
