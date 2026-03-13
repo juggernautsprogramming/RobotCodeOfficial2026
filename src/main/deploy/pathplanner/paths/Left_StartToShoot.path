@@ -1,5 +1,46 @@
 {
   "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 0.7267617689015686,
+        "y": 5.852881597717547
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 1.2628802086155722,
+        "y": 5.807598241590886
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 2.6416833095577745,
+        "y": 5.412967189728959
+      },
+      "prevControl": {
+        "x": 1.7063077478691797,
+        "y": 5.668375111183138
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": null
+    }
+  ],
+  "rotationTargets": [
+    {
+      "waypointRelativePos": 0.0,
+      "rotationDegrees": -28.4
+    },
+    {
+      "waypointRelativePos": 1.0,
+      "rotationDegrees": -43.6
+    }
+  ],
+  "constraintZones": [],
+  "pointTowardsZones": [],
+  "eventMarkers": [],
   "globalConstraints": {
     "maxVelocity": 2.0,
     "maxAcceleration": 2.5,
@@ -12,55 +53,11 @@
     "velocity": 0,
     "rotation": -43.6
   },
-  "useDefaultConstraints": false,
-  "waypoints": [
-    {
-      "anchor": {
-        "x": 0.9,
-        "y": 6.026
-      },
-      "prevControl": null,
-      "nextControl": {
-        "x": 1.46,
-        "y": 6.026
-      },
-      "isLocked": false,
-      "linkedName": null
-    },
-    {
-      "anchor": {
-        "x": 2.5,
-        "y": 6.026
-      },
-      "prevControl": {
-        "x": 1.94,
-        "y": 6.026
-      },
-      "nextControl": null,
-      "isLocked": false,
-      "linkedName": null
-    }
-  ],
-  "rotationTargets": [
-    {
-      "waypointRelativePos": 0.0,
-      "rotationDegrees": -28.4,
-      "rotateFast": false
-    },
-    {
-      "waypointRelativePos": 1.0,
-      "rotationDegrees": -43.6,
-      "rotateFast": false
-    }
-  ],
-  "constraintZones": [],
-  "pointTowardsZones": [],
-  "eventMarkers": [],
   "reversed": false,
   "folder": null,
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -28.4
+    "rotation": 2.6630007660671473
   },
-  "isChoreoPath": false
+  "useDefaultConstraints": false
 }
