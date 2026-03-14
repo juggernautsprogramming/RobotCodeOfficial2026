@@ -73,7 +73,9 @@ public class ActuationSubsystem extends SubsystemBase {
     public void setPower(double power) {
         actuationMotor.setControl(dutyCycleRequest.withOutput(power));
     }
-
+    public double getCurrentPosition() {
+    return actuationMotor.getPosition().getValueAsDouble();
+}
     /**
      * Move to a specific position using Motion Magic.
      * @param rotations Target position in rotations

@@ -20,7 +20,7 @@ public class IntakeRollerSubsystem extends SubsystemBase {
     // ── Hardware IDs ──────────────────────────────────────────────────────────
     private static final int    kLeaderID        = 27;
     private static final int    kFollowerID      = 28;
-    private static final String kCANBus          = "ChassisCAN"; // change if on RIO bus
+    private static final String kCANBus          = "rio"; // change if on RIO bus
 
     // ── Inversion — flip kFollowerInverted if rollers fight each other ────────
     private static final boolean kLeaderInverted   = false;

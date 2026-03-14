@@ -237,6 +237,19 @@ public static final class AutoStartConstants {
          *   Tag 19: (4.0,    4.026), Tag 9: (5.1938, 4.026)  ← X midpoint = 4.5969
          *   Tag 8:  (4.5969, 4.6229), Tag 11: (4.5969, 3.4291) ← Y midpoint = 4.026
          */
+        // ── Flywheel ──────────────────────────────────────────────────────────────────
+        public static final int    FLYWHEEL_LEADER_ID   = 29;   // ← your CAN ID
+        public static final int    FLYWHEEL_FOLLOWER_ID = 30;   // ← your CAN ID
+        public static final String FLYWHEEL_CAN_BUS     = "rio"; // or "CANivore", etc.
+        public static final boolean FLYWHEEL_FOLLOWER_OPPOSE = true; // oppose if motors face each other
+        public static final double FIXED_SHOT_RPM_M    = 3500.0;
+        public static final double FIXED_SHOT_ANGLE_DEG = 45.0; // tune this on the robot
+    // Flywheel PID / feedforward (tune these on the robot)
+        public static final double FLYWHEEL_kP = 0.1;
+        public static final double FLYWHEEL_kI = 0.0;
+        public static final double FLYWHEEL_kD = 0.0;
+        public static final double FLYWHEEL_kS = 0.0;  // static friction feedforward
+        public static final double FLYWHEEL_kV = 0.12; // velocity feedforward — tune first
         public static final Translation2d HUB_CENTER = new Translation2d(4.5969, 4.026);
 
         /**
@@ -286,7 +299,7 @@ public static final class AutoStartConstants {
         /** Pivot motor CAN ID (follower). */
         public static final int PIVOT_FOLLOWER_ID = 99;
         /** CAN bus name for the pivot motors. */
-        public static final String PIVOT_CAN_BUS = "ChassisCAN";
+        public static final String PIVOT_CAN_BUS = "rio";
 
         /** Pivot gear ratio: motor turns per one degree of pivot rotation. */
         public static final double PIVOT_GEAR_RATIO = 1.0; // adjust to actual gearing

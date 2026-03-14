@@ -25,6 +25,7 @@ import org.littletonrobotics.junction.Logger;
 
 // Constants
 import frc.robot.Constants.DriveToPoseConstants;
+import frc.robot.Constants.ShooterConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.Shooter.ShotCalculator;
@@ -115,6 +116,7 @@ public class RobotContainer {
     public final CommandSwerveDrivetrain drivetrain;
     public final VisionSubsystem         visionSubsystem;
     public final ShooterSubsystem        shooterSubsystem;
+    
     public final ClimberSubsystem        climberSubsystem;
     public final FeederSubsystem         feederSubsystem;
     public final ActuationSubsystem      actuationSubsystem;
@@ -130,7 +132,7 @@ public class RobotContainer {
 
         // 2. Shooter early — needed by Named Commands
         shooterSubsystem = new ShooterSubsystem();
-
+        feederSubsystem  = new FeederSubsystem();
         // 3. Configure PathPlanner AutoBuilder
         try {
             RobotConfig config = RobotConfig.fromGUISettings();
@@ -175,6 +177,24 @@ public class RobotContainer {
         NamedCommands.registerCommand("IdleFlywheel",
             Commands.runOnce(shooterSubsystem::idleFlywheel, shooterSubsystem));
 
+        NamedCommands.registerCommand("Shoot",
+            Commands.sequence(
+            Commands.runOnce(() ->
+                shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
+                shooterSubsystem),
+
+            Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(ShooterConstants.FIXED_SHOT_RPM_M)),
+
+            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem),
+
+            Commands.waitSeconds(0.5),
+
+            Commands.runOnce(() -> {
+                feederSubsystem.stop();
+                shooterSubsystem.idleFlywheel();
+            }, shooterSubsystem, feederSubsystem)
+        )
+    );
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
         m_autoChooser.setDefaultOption("Do Nothing", Commands.none());
@@ -192,7 +212,6 @@ public class RobotContainer {
             drivetrain
         );
         climberSubsystem      = new ClimberSubsystem();
-        feederSubsystem       = new FeederSubsystem();
         actuationSubsystem    = new ActuationSubsystem();
         uptakeSubsystem       = new UptakeSubsystem();
         intakeRollerSubsystem = new IntakeRollerSubsystem();  // IDs 27 & 28
@@ -307,17 +326,36 @@ public class RobotContainer {
         // ── Operator (port 1) ─────────────────────────────────────────────────
 
         // Default: arm holds position passively via brake mode — no whirring
-        actuationSubsystem.setDefaultCommand(
-            Commands.run(() -> actuationSubsystem.stop(), actuationSubsystem)
-        );
+        // RobotContainer — replace the default command
+    actuationSubsystem.setDefaultCommand(
+        Commands.run(() -> {}, actuationSubsystem) // idle, no-op — just holds requirement
+    );
 
         // A: Toggle intake — deploy arm + spin all rollers  ↔  retract + 3s roller push then stop
         m_playerStick.a().toggleOnTrue(
-    Commands.startEnd(
-        intakeAdapter::run,
-        intakeAdapter::stop,
-        actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem
-    )
+    Commands.sequence(
+        // Deploy arm + start rollers
+        Commands.runOnce(() -> {
+            actuationSubsystem.setPosition(11.33);
+            uptakeSubsystem.setPower(0.8);
+            intakeRollerSubsystem.setPower(0.8);
+        }, actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem),
+
+        // Wait until arm is fully deployed
+        Commands.waitUntil(() ->
+            Math.abs(actuationSubsystem.getCurrentPosition() - 11.33) < 0.2),
+
+        // Keep rollers spinning until toggled off
+        Commands.run(() -> {
+            uptakeSubsystem.setPower(0.8);
+            intakeRollerSubsystem.setPower(0.8);
+        }, uptakeSubsystem, intakeRollerSubsystem)
+    ).finallyDo(() -> {
+        // On toggle off — stop rollers and retract
+        uptakeSubsystem.stopMotors();
+        intakeRollerSubsystem.stop();
+        actuationSubsystem.setPosition(0.0);
+    })
 );
 
         // B: Toggle feeder — run forward  ↔  stop
@@ -331,15 +369,12 @@ public class RobotContainer {
 
         // X: Toggle shooter flywheel — spin up to optimal RPM  ↔  idle
         m_playerStick.x().toggleOnTrue(
-            Commands.startEnd(
-                () -> {
-                    shooterSubsystem.setFlywheelRPM(ShotCalculator.OPTIMAL_SHOT.rpm());
-                    shooterSubsystem.setLaunchAngleDeg(ShotCalculator.OPTIMAL_SHOT.hoodDeg());
-                },
-                shooterSubsystem::idleFlywheel,
-                shooterSubsystem
-            )
-        );
+    Commands.startEnd(
+        () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
+        shooterSubsystem::idleFlywheel,
+        shooterSubsystem
+    )
+);
 
         // Left Trigger (operator): Climber up (hold), hold position on release
         m_playerStick.leftTrigger().whileTrue(

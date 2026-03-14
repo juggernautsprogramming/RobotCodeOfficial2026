@@ -5,6 +5,7 @@ import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
+import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
@@ -12,16 +13,9 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-
+import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import frc.robot.Constants.ShooterConstants;
 
-/**
- * ShooterSubsystem — pivot angle control (Motion Magic) + flywheel RPM stubs.
- *
- * <h3>Deprecation fix</h3>
- * {@code new TalonFX(id, "CANBusName")} is deprecated in Phoenix 6 2026.
- * Use {@code new TalonFX(id, new CANBus("CANBusName"))} instead.
- */
 public class ShooterSubsystem extends SubsystemBase {
 
     // ── Pivot hardware ────────────────────────────────────────────────────────
@@ -30,9 +24,11 @@ public class ShooterSubsystem extends SubsystemBase {
     private final MotionMagicVoltage m_mmRequest =
         new MotionMagicVoltage(0).withEnableFOC(true);
 
-    // FLYWHEEL_STUB (1): Uncomment and add CAN IDs to ShooterConstants when ready.
-    // private final TalonFX m_flywheelLeader;
-    // private final TalonFX m_flywheelFollower;
+    // ── Flywheel hardware ─────────────────────────────────────────────────────
+    private final TalonFX m_flywheelLeader;
+    private final TalonFX m_flywheelFollower;
+    private final VelocityVoltage m_velocityRequest =
+        new VelocityVoltage(0).withEnableFOC(true);
 
     // ── Internal state ────────────────────────────────────────────────────────
     private double  m_targetPivotDeg = 0.0;
@@ -40,18 +36,20 @@ public class ShooterSubsystem extends SubsystemBase {
     private boolean m_isShooting     = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
-
     public ShooterSubsystem() {
-        // FIX: use CANBus object instead of deprecated TalonFX(int, String)
-        CANBus pivotBus = new CANBus(ShooterConstants.PIVOT_CAN_BUS);
-        m_pivotLeader   = new TalonFX(ShooterConstants.PIVOT_LEADER_ID,   pivotBus);
-        m_pivotFollower = new TalonFX(ShooterConstants.PIVOT_FOLLOWER_ID, pivotBus);
+        CANBus pivotBus    = new CANBus(ShooterConstants.PIVOT_CAN_BUS);
+        CANBus flywheelBus = new CANBus(ShooterConstants.FLYWHEEL_CAN_BUS);
+
+        m_pivotLeader    = new TalonFX(ShooterConstants.PIVOT_LEADER_ID,    pivotBus);
+        m_pivotFollower  = new TalonFX(ShooterConstants.PIVOT_FOLLOWER_ID,  pivotBus);
+        m_flywheelLeader = new TalonFX(ShooterConstants.FLYWHEEL_LEADER_ID, flywheelBus);
+        m_flywheelFollower = new TalonFX(ShooterConstants.FLYWHEEL_FOLLOWER_ID, flywheelBus);
 
         configurePivot();
+        configureFlywheel();
     }
 
     // ── Motor configuration ───────────────────────────────────────────────────
-
     private void configurePivot() {
         TalonFXConfiguration cfg = new TalonFXConfiguration();
         cfg.MotorOutput.Inverted    = InvertedValue.CounterClockwise_Positive;
@@ -72,8 +70,28 @@ public class ShooterSubsystem extends SubsystemBase {
         m_pivotLeader.setPosition(0.0);
     }
 
-    // ── Shooter control methods ────────────────────────────────────────────────
+    private void configureFlywheel() {
+        TalonFXConfiguration cfg = new TalonFXConfiguration();
+        cfg.MotorOutput.NeutralMode = NeutralModeValue.Coast; // coast so wheel spins down naturally
 
+        // Velocity PID + feedforward (kV is the most important — tune first)
+        cfg.Slot0.kP = ShooterConstants.FLYWHEEL_kP;
+        cfg.Slot0.kI = ShooterConstants.FLYWHEEL_kI;
+        cfg.Slot0.kD = ShooterConstants.FLYWHEEL_kD;
+        cfg.Slot0.kS = ShooterConstants.FLYWHEEL_kS;
+        cfg.Slot0.kV = ShooterConstants.FLYWHEEL_kV;
+
+        applyWithRetry(m_flywheelLeader, cfg, "Flywheel Leader");
+
+        // Follower opposes leader if the motors face each other on the same shaft
+        m_flywheelFollower.setControl(
+    new Follower(ShooterConstants.FLYWHEEL_LEADER_ID,
+                 ShooterConstants.FLYWHEEL_FOLLOWER_OPPOSE
+                     ? MotorAlignmentValue.Opposed
+                     : MotorAlignmentValue.Aligned));
+    }
+
+    // ── Shooter control methods ────────────────────────────────────────────────
     public void setLaunchAngleDeg(double degrees) {
         m_targetPivotDeg = degrees;
         double rotations = (degrees / 360.0) * ShooterConstants.PIVOT_GEAR_RATIO;
@@ -82,36 +100,30 @@ public class ShooterSubsystem extends SubsystemBase {
 
     public void setFlywheelRPM(double rpm) {
         m_targetRPM = rpm;
-        SmartDashboard.putNumber("Shooter/Flywheel Target RPM", rpm);
+        // TalonFX velocity control is in rotations/second
+        double rps = rpm / 60.0;
+        m_flywheelLeader.setControl(m_velocityRequest.withVelocity(rps));
     }
 
     public void idleFlywheel() {
-        setFlywheelRPM(ShooterConstants.IDLE_RPM);
-        m_isShooting = false;
-    }
+    m_targetRPM  = 0;
+    m_isShooting = false;
+    m_flywheelLeader.stopMotor();
+    m_flywheelFollower.stopMotor();
+}
 
     public void shoot() {
-        m_isShooting = true;
-        SmartDashboard.putBoolean("Shooter/Firing", true);
-    }
+    setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M);
+    m_isShooting = true;
+}
 
     public boolean isAtTargetRPM(double targetRPM) {
-        // ±50 RPM tolerance gate used by DriveToHubAndShoot's handshake sequence.
-        // Stub returns true until the flywheel encoder is wired. Once wired,
-        // uncomment m_flywheelLeader in the constructor and replace with:
-        //   return Math.abs(getCurrentRPM() - targetRPM) < 50.0;
-        return true;
+        return Math.abs(getCurrentRPM() - targetRPM) < 50.0;
     }
 
-    /**
-     * Current flywheel speed (RPM).
-     * Returns 0 while the flywheel motor is a stub (encoder not yet wired).
-     * Replace body with:
-     *   {@code return m_flywheelLeader.getVelocity().getValueAsDouble() * 60.0;}
-     */
     public double getCurrentRPM() {
-        // stub — replace when flywheel TalonFX is wired
-        return 0.0;
+        // getVelocity() returns rotations/second — multiply by 60 for RPM
+        return m_flywheelLeader.getVelocity().getValueAsDouble() * 60.0;
     }
 
     public boolean isAtTargetAngle(double targetDeg) {
@@ -120,13 +132,14 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     // ── Teleop helpers ────────────────────────────────────────────────────────
-
-    public void moveToDegrees(double degrees)   { setLaunchAngleDeg(degrees); }
-    public void setPowerLevel(double power)      { m_pivotLeader.set(power); }
+    public void moveToDegrees(double degrees) { setLaunchAngleDeg(degrees); }
+    public void setPowerLevel(double power)   { m_pivotLeader.set(power); }
 
     public void stopMotors() {
         m_pivotLeader.stopMotor();
         m_pivotFollower.stopMotor();
+        m_flywheelLeader.stopMotor();
+        m_flywheelFollower.stopMotor();
     }
 
     public double getCurrentAngleDeg() {
@@ -135,18 +148,18 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     // ── Periodic ─────────────────────────────────────────────────────────────
-
     @Override
     public void periodic() {
         SmartDashboard.putNumber ("Shooter/Pivot Angle (deg)",   getCurrentAngleDeg());
         SmartDashboard.putNumber ("Shooter/Pivot Target (deg)",  m_targetPivotDeg);
         SmartDashboard.putBoolean("Shooter/Pivot At Target",     isAtTargetAngle(m_targetPivotDeg));
+        SmartDashboard.putNumber ("Shooter/Flywheel RPM",        getCurrentRPM());
         SmartDashboard.putNumber ("Shooter/Flywheel Target RPM", m_targetRPM);
+        SmartDashboard.putBoolean("Shooter/At Target RPM",       isAtTargetRPM(m_targetRPM));
         SmartDashboard.putBoolean("Shooter/Is Shooting",         m_isShooting);
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────
-
     private static void applyWithRetry(TalonFX motor, TalonFXConfiguration cfg, String label) {
         StatusCode status = StatusCode.StatusCodeNotInitialized;
         for (int i = 0; i < 5; i++) {
