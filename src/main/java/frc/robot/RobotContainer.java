@@ -107,8 +107,9 @@ public class RobotContainer {
 
     // ── Swerve requests ───────────────────────────────────────────────────────
     private final SwerveRequest.FieldCentric m_drive = new SwerveRequest.FieldCentric()
+        .withDeadband(kMaxSpeed * 0.1)
+        .withRotationalDeadband(kMaxAngularRate * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
-        // Deadbands applied manually on raw stick values before slew limiting
 
     private final SwerveRequest.SwerveDriveBrake m_brake = new SwerveRequest.SwerveDriveBrake();
     private final Telemetry m_logger = new Telemetry(kMaxSpeed);
@@ -264,31 +265,16 @@ public class RobotContainer {
                 double translationSpeed = getTranslationSpeed();
                 double turnScale        = getTurnScale();
 
-                // 1. Apply deadband to raw stick values
-                double rawX   = MathUtil.applyDeadband(-m_driverStick.getLeftY(),  kTranslationDeadband);
-                double rawY   = MathUtil.applyDeadband(-m_driverStick.getLeftX(),  kTranslationDeadband);
-                double rawRot = MathUtil.applyDeadband(-m_driverStick.getRightX(), kRotationDeadband);
-
-                // 2. Squared rotation curve — fine control near center, full power at edges
-                rawRot = Math.copySign(rawRot * rawRot, rawRot);
-
-                // 3. Scale to target velocity, apply turn sensitivity
-                double vx  = rawX   * translationSpeed;
-                double vy  = rawY   * translationSpeed;
-                double rot = rawRot * kMaxAngularRate * turnScale;
-
-                // 4. Slew rate limit — smooths out sudden stick movements
-                vx  = m_xLimiter.calculate(vx);
-                vy  = m_yLimiter.calculate(vy);
-                rot = m_rotLimiter.calculate(rot);
-
                 Logger.recordOutput("Driver/TurnScale",        turnScale);
                 Logger.recordOutput("Driver/TranslationSpeed", translationSpeed);
 
                 return m_drive
-                    .withVelocityX(vx)
-                    .withVelocityY(vy)
-                    .withRotationalRate(rot);
+                    .withVelocityX(-m_driverStick.getLeftY() * translationSpeed)
+                    .withVelocityY(-m_driverStick.getLeftX() * translationSpeed)
+                    .withRotationalRate(
+                        -MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15)
+                        * kMaxAngularRate * turnScale
+                    );
             })
         );
 

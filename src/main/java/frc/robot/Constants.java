@@ -246,24 +246,24 @@ public static final class AutoStartConstants {
         public static final double FIXED_SHOT_ANGLE_DEG = 45.0; // tune this on the robot
 
         // ── Distance-based fixed RPM presets (operator D-pad) ─────────────────
-        // D-Pad Up    — close range  (~1.5 m)
-        public static final double PRESET_CLOSE_RPM      = 2000.0;
+        // D-Pad Up    — close range  (1.5 m) ✓ confirmed
+        public static final double PRESET_CLOSE_RPM      = 2700.0;
         public static final double PRESET_CLOSE_DIST_M   = 1.5;
-        // D-Pad Right — mid range    (~2.5 m)
-        public static final double PRESET_MID_RPM        = 3000.0;
+        // D-Pad Right — mid range    (2.5 m) formula: RPM = 773.9·√d + 1752.1
+        public static final double PRESET_MID_RPM        = 2976.0;
         public static final double PRESET_MID_DIST_M     = 2.5;
-        // D-Pad Down  — far range    (~4.0 m)
-        public static final double PRESET_FAR_RPM        = 4000.0;
+        // D-Pad Down  — far range    (4.0 m) ✓ confirmed
+        public static final double PRESET_FAR_RPM        = 3300.0;
         public static final double PRESET_FAR_DIST_M     = 4.0;
-        // D-Pad Left  — very far     (~5.5 m)
-        public static final double PRESET_VFAR_RPM       = 5000.0;
+        // D-Pad Left  — very far     (5.5 m) formula: RPM = 773.9·√d + 1752.1
+        public static final double PRESET_VFAR_RPM       = 3567.0;
         public static final double PRESET_VFAR_DIST_M    = 5.5;
     // Flywheel PID / feedforward (tune these on the robot)
         public static final double FLYWHEEL_kP = 0.3;   // increased: actively corrects RPM error
         public static final double FLYWHEEL_kI = 0.003; // small integral: eliminates steady-state offset
         public static final double FLYWHEEL_kD = 0.0;
-        public static final double FLYWHEEL_kS = 0.0;  // static friction feedforward
-        public static final double FLYWHEEL_kV = 0.12; // velocity feedforward — tune first
+        public static final double FLYWHEEL_kS = 0.0;
+        public static final double FLYWHEEL_kV = 0.13; // V per rot/s — above 0.12 saturates output at high RPM so motor runs at full duty cycle
         public static final Translation2d HUB_CENTER = new Translation2d(4.5969, 4.026);
 
         /**
