@@ -12,6 +12,7 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.util.PathPlannerLogging;
 
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
@@ -77,15 +78,26 @@ import frc.robot.commands.TurnToAngle;
 public class RobotContainer {
 
     // ── Speed constants ───────────────────────────────────────────────────────
-    private final double kMaxSpeed       = 5.0;  // m/s — normal max translation speed
-    private final double kTurboSpeed     = 6.5;  // m/s — turbo max speed (right trigger)
-    private final double kMaxAngularRate = RotationsPerSecond.of(1.5).in(RadiansPerSecond);
+    private final double kMaxSpeed       = 4.5;  // m/s — normal max translation speed
+    private final double kTurboSpeed     = 6.0;  // m/s — turbo max speed (right trigger)
+    private final double kMaxAngularRate = RotationsPerSecond.of(1.0).in(RadiansPerSecond); // reduced for control
 
     // Left trigger turn sensitivity:
     //   Released (0.0) → scale = 1.0 (full turn rate)
     //   Fully pressed (1.0) → scale = kMinTurnScale (20%)
     private final double kMinTurnScale = 0.2;
-    private final double kNudgeSpeed   = 0.2 * kMaxSpeed;
+    private final double kNudgeSpeed   = 0.15 * kMaxSpeed;
+
+    // ── Joystick deadbands ────────────────────────────────────────────────────
+    private static final double kTranslationDeadband = 0.15; // ignore stick drift below this
+    private static final double kRotationDeadband    = 0.20; // rotation needs larger deadband
+
+    // ── Slew rate limiters (acceleration limiting) ────────────────────────────
+    // Units: m/s² for translation, rad/s² for rotation.
+    // Lower value = smoother but less responsive. Tune on carpet.
+    private final SlewRateLimiter m_xLimiter   = new SlewRateLimiter(4.5);
+    private final SlewRateLimiter m_yLimiter   = new SlewRateLimiter(4.5);
+    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(7.0);
 
     // Current limits applied to drive and steer motors at runtime
     private static final double kDriveStatorLimit = 60.0;
@@ -95,9 +107,8 @@ public class RobotContainer {
 
     // ── Swerve requests ───────────────────────────────────────────────────────
     private final SwerveRequest.FieldCentric m_drive = new SwerveRequest.FieldCentric()
-        .withDeadband(kMaxSpeed * 0.1)
-        .withRotationalDeadband(kMaxAngularRate * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+        // Deadbands applied manually on raw stick values before slew limiting
 
     private final SwerveRequest.SwerveDriveBrake m_brake = new SwerveRequest.SwerveDriveBrake();
     private final Telemetry m_logger = new Telemetry(kMaxSpeed);
@@ -116,7 +127,6 @@ public class RobotContainer {
     public final CommandSwerveDrivetrain drivetrain;
     public final VisionSubsystem         visionSubsystem;
     public final ShooterSubsystem        shooterSubsystem;
-    
     public final ClimberSubsystem        climberSubsystem;
     public final FeederSubsystem         feederSubsystem;
     public final ActuationSubsystem      actuationSubsystem;
@@ -132,7 +142,7 @@ public class RobotContainer {
 
         // 2. Shooter early — needed by Named Commands
         shooterSubsystem = new ShooterSubsystem();
-        feederSubsystem  = new FeederSubsystem();
+
         // 3. Configure PathPlanner AutoBuilder
         try {
             RobotConfig config = RobotConfig.fromGUISettings();
@@ -177,24 +187,6 @@ public class RobotContainer {
         NamedCommands.registerCommand("IdleFlywheel",
             Commands.runOnce(shooterSubsystem::idleFlywheel, shooterSubsystem));
 
-        NamedCommands.registerCommand("Shoot",
-            Commands.sequence(
-            Commands.runOnce(() ->
-                shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
-                shooterSubsystem),
-
-            Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(ShooterConstants.FIXED_SHOT_RPM_M)),
-
-            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem),
-
-            Commands.waitSeconds(0.5),
-
-            Commands.runOnce(() -> {
-                feederSubsystem.stop();
-                shooterSubsystem.idleFlywheel();
-            }, shooterSubsystem, feederSubsystem)
-        )
-    );
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
         m_autoChooser.setDefaultOption("Do Nothing", Commands.none());
@@ -212,6 +204,7 @@ public class RobotContainer {
             drivetrain
         );
         climberSubsystem      = new ClimberSubsystem();
+        feederSubsystem       = new FeederSubsystem();
         actuationSubsystem    = new ActuationSubsystem();
         uptakeSubsystem       = new UptakeSubsystem();
         intakeRollerSubsystem = new IntakeRollerSubsystem();  // IDs 27 & 28
@@ -271,16 +264,31 @@ public class RobotContainer {
                 double translationSpeed = getTranslationSpeed();
                 double turnScale        = getTurnScale();
 
+                // 1. Apply deadband to raw stick values
+                double rawX   = MathUtil.applyDeadband(-m_driverStick.getLeftY(),  kTranslationDeadband);
+                double rawY   = MathUtil.applyDeadband(-m_driverStick.getLeftX(),  kTranslationDeadband);
+                double rawRot = MathUtil.applyDeadband(-m_driverStick.getRightX(), kRotationDeadband);
+
+                // 2. Squared rotation curve — fine control near center, full power at edges
+                rawRot = Math.copySign(rawRot * rawRot, rawRot);
+
+                // 3. Scale to target velocity, apply turn sensitivity
+                double vx  = rawX   * translationSpeed;
+                double vy  = rawY   * translationSpeed;
+                double rot = rawRot * kMaxAngularRate * turnScale;
+
+                // 4. Slew rate limit — smooths out sudden stick movements
+                vx  = m_xLimiter.calculate(vx);
+                vy  = m_yLimiter.calculate(vy);
+                rot = m_rotLimiter.calculate(rot);
+
                 Logger.recordOutput("Driver/TurnScale",        turnScale);
                 Logger.recordOutput("Driver/TranslationSpeed", translationSpeed);
 
                 return m_drive
-                    .withVelocityX(-m_driverStick.getLeftY() * translationSpeed)
-                    .withVelocityY(-m_driverStick.getLeftX() * translationSpeed)
-                    .withRotationalRate(
-                        -MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15)
-                        * kMaxAngularRate * turnScale
-                    );
+                    .withVelocityX(vx)
+                    .withVelocityY(vy)
+                    .withRotationalRate(rot);
             })
         );
 
@@ -326,55 +334,41 @@ public class RobotContainer {
         // ── Operator (port 1) ─────────────────────────────────────────────────
 
         // Default: arm holds position passively via brake mode — no whirring
-        // RobotContainer — replace the default command
-    actuationSubsystem.setDefaultCommand(
-        Commands.run(() -> {}, actuationSubsystem) // idle, no-op — just holds requirement
-    );
+        actuationSubsystem.setDefaultCommand(
+            Commands.run(() -> {}, actuationSubsystem) // no-op: lets MotionMagic finish after commands end
+        );
 
         // A: Toggle intake — deploy arm + spin all rollers  ↔  retract + 3s roller push then stop
         m_playerStick.a().toggleOnTrue(
-    Commands.sequence(
-        // Deploy arm + start rollers
-        Commands.runOnce(() -> {
-            actuationSubsystem.setPosition(11.33);
-            uptakeSubsystem.setPower(0.8);
-            intakeRollerSubsystem.setPower(0.8);
-        }, actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem),
-
-        // Wait until arm is fully deployed
-        Commands.waitUntil(() ->
-            Math.abs(actuationSubsystem.getCurrentPosition() - 11.33) < 0.2),
-
-        // Keep rollers spinning until toggled off
-        Commands.run(() -> {
-            uptakeSubsystem.setPower(0.8);
-            intakeRollerSubsystem.setPower(0.8);
-        }, uptakeSubsystem, intakeRollerSubsystem)
-    ).finallyDo(() -> {
-        // On toggle off — stop rollers and retract
-        uptakeSubsystem.stopMotors();
-        intakeRollerSubsystem.stop();
-        actuationSubsystem.setPosition(0.0);
-    })
-);
-
-        // B: Toggle feeder — run forward  ↔  stop
-        m_playerStick.b().toggleOnTrue(
-            Commands.startEnd(
-                () -> feederSubsystem.setPower(5.0),
-                feederSubsystem::stop,
-                feederSubsystem
-            )
-        );
-
-        // X: Toggle shooter flywheel — spin up to optimal RPM  ↔  idle
-        m_playerStick.x().toggleOnTrue(
     Commands.startEnd(
-        () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
-        shooterSubsystem::idleFlywheel,
-        shooterSubsystem
+        intakeAdapter::run,
+        intakeAdapter::stop,
+        actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem
     )
 );
+
+        // B: Toggle feeder — only feeds once flywheel reaches target RPM
+        m_playerStick.b().toggleOnTrue(
+            Commands.run(
+                () -> {
+                    if (shooterSubsystem.isReadyToShoot()) {
+                        feederSubsystem.setPower(5.0);
+                    } else {
+                        feederSubsystem.stop();
+                    }
+                },
+                feederSubsystem
+            ).finallyDo(feederSubsystem::stop)
+        );
+
+        // X: Toggle shooter flywheel — spin up to fixed RPM from Constants  ↔  idle
+        m_playerStick.x().toggleOnTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
+                shooterSubsystem::idleFlywheel,
+                shooterSubsystem
+            )
+        );
 
         // Left Trigger (operator): Climber up (hold), hold position on release
         m_playerStick.leftTrigger().whileTrue(
@@ -407,6 +401,37 @@ public class RobotContainer {
                 () -> feederSubsystem.setPower(-3.0),
                 feederSubsystem::stop,
                 feederSubsystem
+            )
+        );
+
+        // ── Operator D-Pad: distance-based RPM presets ───────────────────────
+        // Each direction selects a fixed-RPM preset; flywheel on/off is still X.
+        // Up    ≈ 1.5 m  → PRESET_CLOSE_RPM
+        m_playerStick.povUp().onTrue(
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_CLOSE_RPM),
+                shooterSubsystem
+            )
+        );
+        // Right ≈ 2.5 m  → PRESET_MID_RPM
+        m_playerStick.povRight().onTrue(
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_MID_RPM),
+                shooterSubsystem
+            )
+        );
+        // Down  ≈ 4.0 m  → PRESET_FAR_RPM
+        m_playerStick.povDown().onTrue(
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_FAR_RPM),
+                shooterSubsystem
+            )
+        );
+        // Left  ≈ 5.5 m  → PRESET_VFAR_RPM
+        m_playerStick.povLeft().onTrue(
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_VFAR_RPM),
+                shooterSubsystem
             )
         );
 

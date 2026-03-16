@@ -118,7 +118,15 @@ public class ShooterSubsystem extends SubsystemBase {
 }
 
     public boolean isAtTargetRPM(double targetRPM) {
-        return Math.abs(getCurrentRPM() - targetRPM) < 50.0;
+        return Math.abs(getCurrentRPM() - targetRPM) < 100.0;
+    }
+
+    /**
+     * Returns true when the flywheel is spinning (target > idle) and within
+     * 50 RPM of the current target. Used to gate the feeder.
+     */
+    public boolean isReadyToShoot() {
+        return m_targetRPM > ShooterConstants.IDLE_RPM && isAtTargetRPM(m_targetRPM);
     }
 
     public double getCurrentRPM() {
@@ -157,6 +165,8 @@ public class ShooterSubsystem extends SubsystemBase {
         SmartDashboard.putNumber ("Shooter/Flywheel Target RPM", m_targetRPM);
         SmartDashboard.putBoolean("Shooter/At Target RPM",       isAtTargetRPM(m_targetRPM));
         SmartDashboard.putBoolean("Shooter/Is Shooting",         m_isShooting);
+        // Green = ready to feed, Red = still spinning up (set widget type to "Boolean Box" in Shuffleboard)
+        SmartDashboard.putBoolean("Shooter/Ready To Shoot",      isReadyToShoot());
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────

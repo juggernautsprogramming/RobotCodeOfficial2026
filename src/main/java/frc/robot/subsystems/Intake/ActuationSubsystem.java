@@ -35,7 +35,7 @@ public class ActuationSubsystem extends SubsystemBase {
 
         // 2. Soft Limits
         config.SoftwareLimitSwitch.ForwardSoftLimitEnable    = true;
-        config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = 11.5; // Rotations
+        config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = 10.5; // Rotations
         config.SoftwareLimitSwitch.ReverseSoftLimitEnable    = true;
         config.SoftwareLimitSwitch.ReverseSoftLimitThreshold = 0;    // Rotations
 
@@ -73,9 +73,7 @@ public class ActuationSubsystem extends SubsystemBase {
     public void setPower(double power) {
         actuationMotor.setControl(dutyCycleRequest.withOutput(power));
     }
-    public double getCurrentPosition() {
-    return actuationMotor.getPosition().getValueAsDouble();
-}
+
     /**
      * Move to a specific position using Motion Magic.
      * @param rotations Target position in rotations

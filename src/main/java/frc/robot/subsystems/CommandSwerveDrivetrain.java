@@ -46,6 +46,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
     /* Keep track if we've ever applied the operator perspective before or not */
     private boolean m_hasAppliedOperatorPerspective = false;
+    /* Track disabled→enabled transition so we reset heading exactly once on enable */
+    private boolean m_wasDisabled = true;
 
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -209,9 +211,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     @Override
     public void periodic() {
-    // Alliance perspective (keep existing code)
-        if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-             DriverStation.getAlliance().ifPresent(allianceColor -> {
+        boolean isDisabled = DriverStation.isDisabled();
+
+        // Alliance perspective — keep trying while disabled so the correct
+        // value is applied as soon as the DS connects and alliance is known.
+        if (!m_hasAppliedOperatorPerspective || isDisabled) {
+            DriverStation.getAlliance().ifPresent(allianceColor -> {
                 setOperatorPerspectiveForward(
                     allianceColor == Alliance.Red
                         ? kRedAlliancePerspectiveRotation
@@ -220,6 +225,23 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 m_hasAppliedOperatorPerspective = true;
             });
         }
+
+        // On the first disabled→enabled transition, snap the pose rotation to
+        // the alliance-expected heading.  This fixes wrong starting orientation
+        // caused by the gyro not being zeroed to the correct field direction.
+        // PathPlanner auto will override this immediately with resetPose(), so
+        // auto start poses are unaffected.
+        if (m_wasDisabled && !isDisabled) {
+            DriverStation.getAlliance().ifPresent(allianceColor -> {
+                Rotation2d expectedHeading = allianceColor == Alliance.Red
+                    ? kRedAlliancePerspectiveRotation
+                    : kBlueAlliancePerspectiveRotation;
+                Pose2d current = getState().Pose;
+                resetPose(new Pose2d(current.getTranslation(), expectedHeading));
+                seedFieldCentric();
+            });
+        }
+        m_wasDisabled = isDisabled;
 
         Pose2d robotPose   = getState().Pose;
         Pose3d robotPose3d = new Pose3d(robotPose);

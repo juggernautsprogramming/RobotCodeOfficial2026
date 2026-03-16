@@ -242,11 +242,25 @@ public static final class AutoStartConstants {
         public static final int    FLYWHEEL_FOLLOWER_ID = 30;   // ← your CAN ID
         public static final String FLYWHEEL_CAN_BUS     = "rio"; // or "CANivore", etc.
         public static final boolean FLYWHEEL_FOLLOWER_OPPOSE = true; // oppose if motors face each other
-        public static final double FIXED_SHOT_RPM_M    = 3500.0;
+        public static final double FIXED_SHOT_RPM_M    = 200.0;
         public static final double FIXED_SHOT_ANGLE_DEG = 45.0; // tune this on the robot
+
+        // ── Distance-based fixed RPM presets (operator D-pad) ─────────────────
+        // D-Pad Up    — close range  (~1.5 m)
+        public static final double PRESET_CLOSE_RPM      = 2000.0;
+        public static final double PRESET_CLOSE_DIST_M   = 1.5;
+        // D-Pad Right — mid range    (~2.5 m)
+        public static final double PRESET_MID_RPM        = 3000.0;
+        public static final double PRESET_MID_DIST_M     = 2.5;
+        // D-Pad Down  — far range    (~4.0 m)
+        public static final double PRESET_FAR_RPM        = 4000.0;
+        public static final double PRESET_FAR_DIST_M     = 4.0;
+        // D-Pad Left  — very far     (~5.5 m)
+        public static final double PRESET_VFAR_RPM       = 5000.0;
+        public static final double PRESET_VFAR_DIST_M    = 5.5;
     // Flywheel PID / feedforward (tune these on the robot)
-        public static final double FLYWHEEL_kP = 0.1;
-        public static final double FLYWHEEL_kI = 0.0;
+        public static final double FLYWHEEL_kP = 0.3;   // increased: actively corrects RPM error
+        public static final double FLYWHEEL_kI = 0.003; // small integral: eliminates steady-state offset
         public static final double FLYWHEEL_kD = 0.0;
         public static final double FLYWHEEL_kS = 0.0;  // static friction feedforward
         public static final double FLYWHEEL_kV = 0.12; // velocity feedforward — tune first
