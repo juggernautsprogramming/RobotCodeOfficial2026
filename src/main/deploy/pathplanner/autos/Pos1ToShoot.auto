@@ -7,13 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Position1ToHub4meters"
+            "pathName": "Position1ToHub2.5meters"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": null
+            "name": "Shoot_Mid"
           }
         }
       ]
