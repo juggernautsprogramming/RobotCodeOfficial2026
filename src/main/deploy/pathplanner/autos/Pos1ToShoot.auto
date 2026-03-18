@@ -7,19 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "MoveFromHubTo1.5Meters"
+            "pathName": "Position1ToHub4meters"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "Shoot_Close"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": "IdleFlywheel"
+            "name": null
           }
         }
       ]

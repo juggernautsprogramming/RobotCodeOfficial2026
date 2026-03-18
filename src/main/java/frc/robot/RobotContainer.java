@@ -228,11 +228,11 @@ public class RobotContainer {
                 shooterSubsystem));
 
         // ── Full shoot sequences (spin up → wait for RPM → feed → stop) ──────
-        // Each command is self-contained: set RPM, wait (≤2 s), feed 0.5 s, stop feeder.
-        NamedCommands.registerCommand("Shoot_Close", makeShootCommand(ShooterConstants.PRESET_CLOSE_RPM));
-        NamedCommands.registerCommand("Shoot_Mid",   makeShootCommand(ShooterConstants.PRESET_MID_RPM));
-        NamedCommands.registerCommand("Shoot_Far",   makeShootCommand(ShooterConstants.PRESET_FAR_RPM));
-        NamedCommands.registerCommand("Shoot_VFar",  makeShootCommand(ShooterConstants.PRESET_VFAR_RPM));
+        // Each command is self-contained: set RPM, wait (≤2 s), feed all 8 balls, stop feeder.
+        NamedCommands.registerCommand("Shoot_Close", makeShootCommand(ShooterConstants.PRESET_CLOSE_RPM, 8));
+        NamedCommands.registerCommand("Shoot_Mid",   makeShootCommand(ShooterConstants.PRESET_MID_RPM,   8));
+        NamedCommands.registerCommand("Shoot_Far",   makeShootCommand(ShooterConstants.PRESET_FAR_RPM,   8));
+        NamedCommands.registerCommand("Shoot_VFar",  makeShootCommand(ShooterConstants.PRESET_VFAR_RPM,  8));
 
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
@@ -470,15 +470,18 @@ public class RobotContainer {
 
     /**
      * Builds a self-contained shoot command for PathPlanner named commands.
-     * Sequence: set RPM → wait until at speed (≤2 s safety timeout) → run feeder 0.5 s → stop feeder.
+     * Sequence: set RPM → wait until at speed (≤2 s timeout) → run feeder for all balls → stop feeder.
+     * Feed time = balls × 0.25 s per ball + 0.5 s buffer.
+     * Calibrated from observed cycle rate: ~2 balls per 0.5 s on the robot.
      * The flywheel keeps spinning after this command; follow with "IdleFlywheel" when done.
      */
-    private Command makeShootCommand(double targetRpm) {
+    private Command makeShootCommand(double targetRpm, int balls) {
+        double feedSeconds = balls * 0.25 + 0.5;
         return Commands.sequence(
             Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(targetRpm), shooterSubsystem),
             Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(targetRpm)).withTimeout(2.0),
             Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem),
-            Commands.waitSeconds(0.5),
+            Commands.waitSeconds(feedSeconds),
             Commands.runOnce(feederSubsystem::stop, feederSubsystem)
         );
     }
