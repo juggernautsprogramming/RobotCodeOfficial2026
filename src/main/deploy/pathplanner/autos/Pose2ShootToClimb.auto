@@ -7,7 +7,7 @@
         {
           "type": "path",
           "data": {
-            "pathName": "MoveFromHubTo1.5Meters"
+            "pathName": "Pose2ToHub1.5Meters"
           }
         },
         {
@@ -20,6 +20,12 @@
           "type": "named",
           "data": {
             "name": "IdleFlywheel"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Pose2ShootToClimb"
           }
         }
       ]

@@ -21,6 +21,36 @@
           "data": {
             "name": "IdleFlywheel"
           }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Position1ToHubMoveToPlayer"
+          }
+        },
+        {
+          "type": "wait",
+          "data": {
+            "waitTime": 3.0
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Position1ToHubPlayerToHub"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Shoot_Far"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "IdleFlywheel"
+          }
         }
       ]
     }
