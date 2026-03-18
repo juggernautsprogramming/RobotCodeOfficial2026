@@ -13,13 +13,19 @@
         {
           "type": "named",
           "data": {
-            "name": "Shoot_Close"
+            "name": "Shoot_Mid"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "IdleFlywheel"
           }
         }
       ]
     }
   },
-  "resetOdom": false,
+  "resetOdom": true,
   "folder": null,
   "choreoAuto": false
 }
