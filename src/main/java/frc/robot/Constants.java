@@ -247,23 +247,42 @@ public static final class AutoStartConstants {
 
         // ── Distance-based fixed RPM presets (operator D-pad) ─────────────────
         // D-Pad Up    — close range  (1.5 m) ✓ confirmed
-        public static final double PRESET_CLOSE_RPM      = 2440.0;
+        public static final double PRESET_CLOSE_RPM      = 1850.0;
         public static final double PRESET_CLOSE_DIST_M   = 1.5;
-        // D-Pad Right — mid range    (2.5 m) Confirmed
-        public static final double PRESET_MID_RPM        = 2610.0;
+        // D-Pad Right — mid range    (2.5 m) 
+        public static final double PRESET_MID_RPM        = 2200.0;
         public static final double PRESET_MID_DIST_M     = 2.5;
-        // D-Pad Down  — far range    (4.0 m) Confirmed
-        public static final double PRESET_FAR_RPM        = 3000;
+        // D-Pad Down  — far range    (4.0 m) 
+        public static final double PRESET_FAR_RPM        = 2680.0;
         public static final double PRESET_FAR_DIST_M     = 4.0;
-        // D-Pad Left  — very far     (5.5 m) Confirmed
+        // D-Pad Left  — very far     (5.5 m) 
         public static final double PRESET_VFAR_RPM       = 3600;
         public static final double PRESET_VFAR_DIST_M    = 5.5;
-    // Flywheel PID / feedforward (tune these on the robot)
-        public static final double FLYWHEEL_kP = 0.3;   // increased: actively corrects RPM error
-        public static final double FLYWHEEL_kI = 0.003; // small integral: eliminates steady-state offset
-        public static final double FLYWHEEL_kD = 0.0;
-        public static final double FLYWHEEL_kS = 0.0;
-        public static final double FLYWHEEL_kV = 0.13; // V per rot/s — above 0.12 saturates output at high RPM so motor runs at full duty cycle
+    // ── Flywheel stator current limit ─────────────────────────────────────────
+        /** Stator current limit for flywheel motors (Amps). Prevents brown-outs. */
+        public static final double FLYWHEEL_STATOR_LIMIT_AMPS = 60.0;
+
+        // ── Flywheel PID / feedforward — VelocityTorqueCurrentFOC (Phoenix Pro) ──────
+        // All gains are in Amps, NOT Volts. Run WPILib SysId (quasistatic + dynamic),
+        // then divide the reported kS/kV/kA voltage values by the motor's Kt (~0.0181 V/A
+        // for Kraken X60 / Falcon 500) to obtain the Amp-domain equivalents.
+        public static final double FLYWHEEL_kP = 6.0;   // A per RPS of error — start here, tune up
+        public static final double FLYWHEEL_kI = 0.0;   // A per accumulated rotation — leave 0 initially
+        public static final double FLYWHEEL_kD = 0.0;   // A per RPS/s — leave 0 initially
+        public static final double FLYWHEEL_kS = 12.426
+        ;   // A — static friction; set from SysId result / Kt
+        public static final double FLYWHEEL_kV = 0.1565;   // A per RPS — velocity FF; set from SysId result / Kt
+        public static final double FLYWHEEL_kA = 0.0;   // A per RPS/s — accel FF; set from SysId result / Kt
+
+        // ── Distance → RPM interpolation table ────────────────────────────────
+        // All four points confirmed on the physical field.
+        // Format: { distance_meters, target_rpm }
+        public static final double[][] RPM_DISTANCE_TABLE = {
+            { 1.5, 1850.0 },  // close — confirmed
+            { 2.5, 2200.0 },  // mid   — confirmed
+            { 4.0, 2680.0 },  // far   — confirmed
+            { 5.5, 3600.0 },  // vfar  — confirmed
+        };
         public static final Translation2d HUB_CENTER = new Translation2d(4.5969, 4.026);
 
         /**

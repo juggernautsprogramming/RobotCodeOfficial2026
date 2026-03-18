@@ -1,19 +1,26 @@
 package frc.robot.subsystems.Shooter;
 
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.RotationsPerSecond;
+import static edu.wpi.first.units.Units.Volts;
+
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
-import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.VelocityTorqueCurrentFOC; // Phoenix Pro — requires activated license
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants.ShooterConstants;
 
 public class ShooterSubsystem extends SubsystemBase {
@@ -27,8 +34,31 @@ public class ShooterSubsystem extends SubsystemBase {
     // ── Flywheel hardware ─────────────────────────────────────────────────────
     private final TalonFX m_flywheelLeader;
     private final TalonFX m_flywheelFollower;
-    private final VelocityVoltage m_velocityRequest =
-        new VelocityVoltage(0).withEnableFOC(true);
+
+    // VelocityTorqueCurrentFOC: Phoenix Pro only. Runs the closed-loop on the
+    // motor's 1 kHz update cycle and is immune to battery voltage sag.
+    private final VelocityTorqueCurrentFOC m_velocityRequest =
+        new VelocityTorqueCurrentFOC(0); // uses Slot 0 by default
+
+    // VoltageOut used only during SysId characterization runs (not normal operation)
+    private final VoltageOut m_sysIdVoltageRequest = new VoltageOut(0);
+
+    // ── Distance → RPM interpolation table ───────────────────────────────────
+    // Populated at construction from ShooterConstants.RPM_DISTANCE_TABLE.
+    // Call setFlywheelRPMFromDistance() to use it.
+    private static final InterpolatingDoubleTreeMap m_rpmTable = new InterpolatingDoubleTreeMap();
+    static {
+        for (double[] entry : ShooterConstants.RPM_DISTANCE_TABLE) {
+            m_rpmTable.put(entry[0], entry[1]);
+        }
+    }
+
+    // ── SysId routine ─────────────────────────────────────────────────────────
+    // Initialized in the constructor (after m_flywheelLeader is assigned).
+    // Use sysIdQuasistatic() and sysIdDynamic() command factories in RobotContainer.
+    // After running: divide reported kS/kV/kA (Volts) by motor Kt (~0.0181 V/A for
+    // Kraken X60 / Falcon 500) to get the Amp-domain gains for VelocityTorqueCurrentFOC.
+    private final SysIdRoutine m_sysIdRoutine;
 
     // ── Internal state ────────────────────────────────────────────────────────
     private double  m_targetPivotDeg = 0.0;
@@ -47,6 +77,23 @@ public class ShooterSubsystem extends SubsystemBase {
 
         configurePivot();
         configureFlywheel();
+
+        m_sysIdRoutine = new SysIdRoutine(
+            new SysIdRoutine.Config(
+                null,           // default ramp rate (1 V/s)
+                Volts.of(7),    // max voltage during dynamic test
+                null            // default timeout
+            ),
+            new SysIdRoutine.Mechanism(
+                (volts) -> m_flywheelLeader.setControl(
+                    m_sysIdVoltageRequest.withOutput(volts.in(Volts))),
+                (log) -> log.motor("flywheel-leader")
+                    .voltage(Volts.of(m_flywheelLeader.getMotorVoltage().getValueAsDouble()))
+                    .angularPosition(Rotations.of(m_flywheelLeader.getPosition().getValueAsDouble()))
+                    .angularVelocity(RotationsPerSecond.of(m_flywheelLeader.getVelocity().getValueAsDouble())),
+                this
+            )
+        );
     }
 
     // ── Motor configuration ───────────────────────────────────────────────────
@@ -72,23 +119,28 @@ public class ShooterSubsystem extends SubsystemBase {
 
     private void configureFlywheel() {
         TalonFXConfiguration cfg = new TalonFXConfiguration();
-        cfg.MotorOutput.NeutralMode = NeutralModeValue.Coast; // coast so wheel spins down naturally
+        cfg.MotorOutput.NeutralMode = NeutralModeValue.Coast;
 
-        // Velocity PID + feedforward (kV is the most important — tune first)
+        // Stator current limit — prevents brown-outs under load
+        cfg.CurrentLimits.StatorCurrentLimit       = ShooterConstants.FLYWHEEL_STATOR_LIMIT_AMPS;
+        cfg.CurrentLimits.StatorCurrentLimitEnable = true;
+
+        // Slot 0 gains for VelocityTorqueCurrentFOC — units are AMPS (not Volts).
+        // Populate kS/kV/kA after tuning in Phoenix Tuner X.
         cfg.Slot0.kP = ShooterConstants.FLYWHEEL_kP;
         cfg.Slot0.kI = ShooterConstants.FLYWHEEL_kI;
         cfg.Slot0.kD = ShooterConstants.FLYWHEEL_kD;
         cfg.Slot0.kS = ShooterConstants.FLYWHEEL_kS;
         cfg.Slot0.kV = ShooterConstants.FLYWHEEL_kV;
+        cfg.Slot0.kA = ShooterConstants.FLYWHEEL_kA;
 
         applyWithRetry(m_flywheelLeader, cfg, "Flywheel Leader");
 
-        // Follower opposes leader if the motors face each other on the same shaft
         m_flywheelFollower.setControl(
-    new Follower(ShooterConstants.FLYWHEEL_LEADER_ID,
-                 ShooterConstants.FLYWHEEL_FOLLOWER_OPPOSE
-                     ? MotorAlignmentValue.Opposed
-                     : MotorAlignmentValue.Aligned));
+            new Follower(ShooterConstants.FLYWHEEL_LEADER_ID,
+                ShooterConstants.FLYWHEEL_FOLLOWER_OPPOSE
+                    ? MotorAlignmentValue.Opposed
+                    : MotorAlignmentValue.Aligned));
     }
 
     // ── Shooter control methods ────────────────────────────────────────────────
@@ -105,17 +157,29 @@ public class ShooterSubsystem extends SubsystemBase {
         m_flywheelLeader.setControl(m_velocityRequest.withVelocity(rps));
     }
 
+    /**
+     * Look up the target RPM from the distance→RPM interpolation table and
+     * command the flywheel to that speed. Call this with the camera-measured
+     * distance to the hub each loop while the robot is aiming.
+     *
+     * @param distanceMeters Horizontal distance from shooter exit to hub (metres).
+     */
+    public void setFlywheelRPMFromDistance(double distanceMeters) {
+        double rpm = m_rpmTable.get(distanceMeters);
+        setFlywheelRPM(rpm);
+    }
+
     public void idleFlywheel() {
-    m_targetRPM  = 0;
-    m_isShooting = false;
-    m_flywheelLeader.stopMotor();
-    m_flywheelFollower.stopMotor();
-}
+        m_targetRPM  = 0;
+        m_isShooting = false;
+        m_flywheelLeader.stopMotor();
+        m_flywheelFollower.stopMotor();
+    }
 
     public void shoot() {
-    setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M);
-    m_isShooting = true;
-}
+        setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M);
+        m_isShooting = true;
+    }
 
     public boolean isAtTargetRPM(double targetRPM) {
         return Math.abs(getCurrentRPM() - targetRPM) < 100.0;
@@ -155,6 +219,18 @@ public class ShooterSubsystem extends SubsystemBase {
             / ShooterConstants.PIVOT_GEAR_RATIO) * 360.0;
     }
 
+    // ── SysId command factories ────────────────────────────────────────────────
+    // Wire these up in RobotContainer to joystick buttons for characterization.
+    // Run quasistatic forward, quasistatic reverse, dynamic forward, dynamic reverse
+    // in sequence, then open WPILib SysId analyzer to get kS/kV/kA.
+    public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
+        return m_sysIdRoutine.quasistatic(direction);
+    }
+
+    public Command sysIdDynamic(SysIdRoutine.Direction direction) {
+        return m_sysIdRoutine.dynamic(direction);
+    }
+
     // ── Periodic ─────────────────────────────────────────────────────────────
     @Override
     public void periodic() {
@@ -165,7 +241,6 @@ public class ShooterSubsystem extends SubsystemBase {
         SmartDashboard.putNumber ("Shooter/Flywheel Target RPM", m_targetRPM);
         SmartDashboard.putBoolean("Shooter/At Target RPM",       isAtTargetRPM(m_targetRPM));
         SmartDashboard.putBoolean("Shooter/Is Shooting",         m_isShooting);
-        // Green = ready to feed, Red = still spinning up (set widget type to "Boolean Box" in Shuffleboard)
         SmartDashboard.putBoolean("Shooter/Ready To Shoot",      isReadyToShoot());
     }
 
