@@ -255,7 +255,7 @@ public static final class AutoStartConstants {
         // D-Pad Down  — far range    (4.0 m) Confirmed
         public static final double PRESET_FAR_RPM        = 3000;
         public static final double PRESET_FAR_DIST_M     = 4.0;
-        // D-Pad Left  — very far     (5.5 m) 
+        // D-Pad Left  — very far     (5.5 m) Confirmed
         public static final double PRESET_VFAR_RPM       = 3600;
         public static final double PRESET_VFAR_DIST_M    = 5.5;
     // Flywheel PID / feedforward (tune these on the robot)
