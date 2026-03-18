@@ -400,4 +400,27 @@ public static final class AutoStartConstants {
 
         private ShooterConstants() {}
     }
+
+    // =========================================================================
+    // INTAKE
+    // =========================================================================
+
+    public static final class IntakeConstants {
+        /** Actuation motor CAN ID. */
+        public static final int ACTUATION_MOTOR_ID = 26;
+
+        /** Target position (rotations) when the arm is fully deployed. */
+        public static final double DEPLOYED_ROTATIONS = 11.33;
+        /** Target position (rotations) when the arm is fully stowed. */
+        public static final double STOWED_ROTATIONS   = 0.0;
+        /** Bar stops spinning when arm is within this many rotations of stow. */
+        public static final double STOW_TOLERANCE     = 0.5;
+
+        /** Duty-cycle power for the uptake roller (0–1). */
+        public static final double ROLLER_POWER = 0.65;
+        /** Duty-cycle power for the intake bar/rod motors (0–1). */
+        public static final double BAR_POWER    = 0.7;
+
+        private IntakeConstants() {}
+    }
 }

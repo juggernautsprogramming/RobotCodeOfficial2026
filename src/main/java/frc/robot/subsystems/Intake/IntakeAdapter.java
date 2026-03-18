@@ -1,5 +1,8 @@
 package frc.robot.subsystems.Intake;
 
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants.IntakeConstants;
+
 /**
  * IntakeAdapter — thin facade that coordinates ActuationSubsystem (arm deploy),
  * UptakeSubsystem (uptake roller, ID 42), and IntakeRollerSubsystem (bar
@@ -11,20 +14,18 @@ package frc.robot.subsystems.Intake;
  * Intake rollers   (IDs 27 & 28): spins the intake bar/rod
  * ──────────────────────────────────────────────────────────────────────────
  *
- * TUNE: Set DEPLOYED_ROTATIONS to the motor rotations that fully extend
- * your intake arm. Set STOWED_ROTATIONS to fully retracted.
+ * When stop() is called, the arm retracts and the uptake stops immediately,
+ * but the bar keeps spinning until the arm reaches the stow position so any
+ * ball caught during retraction is still fed in.
  */
-public class IntakeAdapter {
-
-    // ── Tune these to your mechanism ──────────────────────────────────────────
-    private static final double DEPLOYED_ROTATIONS = 11.33; // actuation arm out
-    private static final double STOWED_ROTATIONS   =  0.0;  // actuation arm in
-    private static final double ROLLER_POWER       =  0.8;  // uptake roller speed
-    private static final double BAR_POWER          =  0.8;  // intake bar/rod speed
+public class IntakeAdapter extends SubsystemBase {
 
     private final ActuationSubsystem     m_actuation;
     private final UptakeSubsystem        m_uptake;
     private final IntakeRollerSubsystem  m_rollers;
+
+    /** True while the arm is retracting and bar should still spin. */
+    private boolean m_retractingToStow = false;
 
     public IntakeAdapter(
             ActuationSubsystem actuation,
@@ -37,22 +38,42 @@ public class IntakeAdapter {
 
     /** Deploy arm + spin uptake roller + spin intake bar — call at start of intake phase. */
     public void run() {
-        m_actuation.setPosition(DEPLOYED_ROTATIONS);
-        m_uptake.setPower(ROLLER_POWER);
-        m_rollers.setPower(BAR_POWER);
+        m_retractingToStow = false;
+        m_actuation.setPosition(IntakeConstants.DEPLOYED_ROTATIONS);
+        m_uptake.setPower(IntakeConstants.ROLLER_POWER);
+        m_rollers.setPower(IntakeConstants.BAR_POWER);
     }
 
-    /** Stop all motors + retract arm — call when done collecting. */
+    /**
+     * Begin stow sequence — retracts arm and stops uptake immediately.
+     * The bar keeps spinning until the arm reaches stow position (handled by periodic).
+     */
     public void stop() {
+        m_retractingToStow = true;
         m_uptake.stopMotors();
-        m_rollers.stop();
-        m_actuation.setPosition(STOWED_ROTATIONS);
+        // bar intentionally left running — periodic() stops it once arm is home
+        m_actuation.setPosition(IntakeConstants.STOWED_ROTATIONS);
     }
 
     /** Reverse both rollers and bar to eject. */
     public void eject() {
-        m_uptake.setPower(-ROLLER_POWER);
-        m_rollers.setPower(-BAR_POWER);
+        m_retractingToStow = false;
+        m_uptake.setPower(-IntakeConstants.ROLLER_POWER);
+        m_rollers.setPower(-IntakeConstants.BAR_POWER);
+    }
+
+    /**
+     * Stops the bar once the arm reaches the stow position after stop() is called.
+     * Runs every 20 ms by the command scheduler.
+     */
+    @Override
+    public void periodic() {
+        if (m_retractingToStow
+                && m_actuation.getCurrentPosition()
+                    <= IntakeConstants.STOWED_ROTATIONS + IntakeConstants.STOW_TOLERANCE) {
+            m_rollers.stop();
+            m_retractingToStow = false;
+        }
     }
 
     /**

@@ -86,6 +86,11 @@ public class ActuationSubsystem extends SubsystemBase {
         actuationMotor.stopMotor();
     }
 
+    /** Returns current arm position in rotations. */
+    public double getCurrentPosition() {
+        return actuationMotor.getPosition().getValueAsDouble();
+    }
+
     @Override
     public void periodic() {
         // This runs every 20ms. Useful for logging or dashboard updates.
