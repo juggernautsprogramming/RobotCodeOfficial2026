@@ -141,8 +141,13 @@ public class RobotContainer {
         drivetrain = TunerConstants.createDrivetrain();
         applyDrivetrainLimits();
 
-        // 2. Shooter early — needed by Named Commands
-        shooterSubsystem = new ShooterSubsystem();
+        // 2. Mechanism subsystems — all instantiated before Named Commands
+        shooterSubsystem      = new ShooterSubsystem();
+        feederSubsystem       = new FeederSubsystem();
+        actuationSubsystem    = new ActuationSubsystem();
+        uptakeSubsystem       = new UptakeSubsystem();
+        intakeRollerSubsystem = new IntakeRollerSubsystem();
+        intakeAdapter         = new IntakeAdapter(actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem);
 
         // 3. Configure PathPlanner AutoBuilder
         try {
@@ -180,13 +185,54 @@ public class RobotContainer {
             pose -> Logger.recordOutput("PathPlanner/CurrentPose", pose));
 
         // 5. Register Named Commands — before buildAuto()
+
+        // ── Flywheel ─────────────────────────────────────────────────────────
         NamedCommands.registerCommand("SpinUpFlywheel", Commands.runOnce(() -> {
             shooterSubsystem.setFlywheelRPM(ShotCalculator.OPTIMAL_SHOT.rpm());
             shooterSubsystem.setLaunchAngleDeg(ShotCalculator.OPTIMAL_SHOT.hoodDeg());
         }, shooterSubsystem));
-
         NamedCommands.registerCommand("IdleFlywheel",
             Commands.runOnce(shooterSubsystem::idleFlywheel, shooterSubsystem));
+
+        // ── Intake ────────────────────────────────────────────────────────────
+        // "StartIntake" — deploy arm + run all rollers (use until ball collected)
+        NamedCommands.registerCommand("StartIntake",
+            Commands.runOnce(intakeAdapter::run,
+                actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem));
+        // "StopIntake" — retract arm + stop all rollers
+        NamedCommands.registerCommand("StopIntake",
+            Commands.runOnce(intakeAdapter::stop,
+                actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem));
+
+        // ── Feeder ────────────────────────────────────────────────────────────
+        // "StartFeeder" — run feeder (gate check done by operator; in auto pair with SpinUp_*)
+        NamedCommands.registerCommand("StartFeeder",
+            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem));
+        // "StopFeeder" — stop feeder roller
+        NamedCommands.registerCommand("StopFeeder",
+            Commands.runOnce(feederSubsystem::stop, feederSubsystem));
+
+        // ── Flywheel spin-up presets (instant — flywheel keeps running until IdleFlywheel) ──
+        // Pair with StartFeeder / StopFeeder for manual control in path events.
+        NamedCommands.registerCommand("SpinUp_Close",   // 1.5 m
+            Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_CLOSE_RPM),
+                shooterSubsystem));
+        NamedCommands.registerCommand("SpinUp_Mid",     // 2.5 m
+            Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_MID_RPM),
+                shooterSubsystem));
+        NamedCommands.registerCommand("SpinUp_Far",     // 4.0 m
+            Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_FAR_RPM),
+                shooterSubsystem));
+        NamedCommands.registerCommand("SpinUp_VFar",    // 5.5 m
+            Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_VFAR_RPM),
+                shooterSubsystem));
+
+        // ── Full shoot sequences (spin up → wait for RPM → feed → stop) ──────
+        // Each command is self-contained: set RPM, wait (≤2 s), feed 0.5 s, stop feeder.
+        NamedCommands.registerCommand("Shoot_Close", makeShootCommand(ShooterConstants.PRESET_CLOSE_RPM));
+        NamedCommands.registerCommand("Shoot_Mid",   makeShootCommand(ShooterConstants.PRESET_MID_RPM));
+        NamedCommands.registerCommand("Shoot_Far",   makeShootCommand(ShooterConstants.PRESET_FAR_RPM));
+        NamedCommands.registerCommand("Shoot_VFar",  makeShootCommand(ShooterConstants.PRESET_VFAR_RPM));
 
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
@@ -196,20 +242,15 @@ public class RobotContainer {
         }
         SmartDashboard.putData("Auto Chooser", m_autoChooser);
 
-        // 7. Remaining subsystems
-        visionSubsystem = new VisionSubsystem(
+        // 7. Remaining subsystems (vision + climber — not needed by named commands)
+        visionSubsystem  = new VisionSubsystem(
             new String[]{
                 VisionHardware.CAMERA_BACK_LEFT,
                 VisionHardware.CAMERA_BACK_RIGHT
             },
             drivetrain
         );
-        climberSubsystem      = new ClimberSubsystem();
-        feederSubsystem       = new FeederSubsystem();
-        actuationSubsystem    = new ActuationSubsystem();
-        uptakeSubsystem       = new UptakeSubsystem();
-        intakeRollerSubsystem = new IntakeRollerSubsystem();  // IDs 27 & 28
-        intakeAdapter         = new IntakeAdapter(actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem);
+        climberSubsystem = new ClimberSubsystem();
 
         // Publish shot-calculator results once
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
@@ -426,6 +467,21 @@ public class RobotContainer {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Builds a self-contained shoot command for PathPlanner named commands.
+     * Sequence: set RPM → wait until at speed (≤2 s safety timeout) → run feeder 0.5 s → stop feeder.
+     * The flywheel keeps spinning after this command; follow with "IdleFlywheel" when done.
+     */
+    private Command makeShootCommand(double targetRpm) {
+        return Commands.sequence(
+            Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(targetRpm), shooterSubsystem),
+            Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(targetRpm)).withTimeout(2.0),
+            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem),
+            Commands.waitSeconds(0.5),
+            Commands.runOnce(feederSubsystem::stop, feederSubsystem)
+        );
+    }
 
     /** Returns the robot's current heading in degrees (field-relative). */
     public double getCurrentRotation() {

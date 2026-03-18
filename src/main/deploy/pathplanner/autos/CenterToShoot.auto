@@ -7,13 +7,19 @@
         {
           "type": "path",
           "data": {
-            "pathName": "straightLine"
+            "pathName": "MoveFromHubTo1.5Meters"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Shoot_Close"
           }
         }
       ]
     }
   },
-  "resetOdom": true,
+  "resetOdom": false,
   "folder": null,
   "choreoAuto": false
 }
