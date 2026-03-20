@@ -41,6 +41,7 @@ import frc.robot.subsystems.Intake.ActuationSubsystem;
 import frc.robot.subsystems.Intake.UptakeSubsystem;
 import frc.robot.subsystems.Intake.IntakeRollerSubsystem;
 import frc.robot.subsystems.Intake.IntakeAdapter;
+import frc.robot.subsystems.Turret.TurretSubsystem;
 
 // Commands
 import frc.robot.commands.DriveToHubAndShoot;
@@ -134,6 +135,7 @@ public class RobotContainer {
     public final UptakeSubsystem         uptakeSubsystem;
     public final IntakeRollerSubsystem   intakeRollerSubsystem;
     public final IntakeAdapter           intakeAdapter;
+    public final TurretSubsystem         turretSubsystem;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public RobotContainer() {
@@ -251,6 +253,7 @@ public class RobotContainer {
             drivetrain
         );
         climberSubsystem = new ClimberSubsystem();
+        turretSubsystem  = new TurretSubsystem();
 
         // Publish shot-calculator results once
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
@@ -391,7 +394,7 @@ public class RobotContainer {
         // X: Toggle shooter flywheel — spin up to fixed RPM from Constants  ↔  idle
         m_playerStick.x().toggleOnTrue(
             Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M),
+                () -> shooterSubsystem.setFlywheelRPM(0),
                 shooterSubsystem::idleFlywheel,
                 shooterSubsystem
             )
@@ -434,32 +437,68 @@ public class RobotContainer {
         // ── Operator D-Pad: distance-based RPM presets ───────────────────────
         // Each direction selects a fixed-RPM preset; flywheel on/off is still X.
         // Up    ≈ 1.5 m  → PRESET_CLOSE_RPM
-        m_playerStick.povUp().onTrue(
+        m_playerStick.povUp().toggleOnTrue(
             Commands.runOnce(
                 () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_CLOSE_RPM),
                 shooterSubsystem
             )
+        ).onFalse (
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(0),
+                shooterSubsystem
+            )
         );
         // Right ≈ 2.5 m  → PRESET_MID_RPM
-        m_playerStick.povRight().onTrue(
+        m_playerStick.povRight().toggleOnTrue(
             Commands.runOnce(
                 () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_MID_RPM),
                 shooterSubsystem
             )
+        ).onFalse (
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(0),
+                shooterSubsystem
+            )
         );
         // Down  ≈ 4.0 m  → PRESET_FAR_RPM
-        m_playerStick.povDown().onTrue(
+        m_playerStick.povDown().toggleOnTrue(
             Commands.runOnce(
                 () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_FAR_RPM),
                 shooterSubsystem
             )
+        ).onFalse (
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(0),
+                shooterSubsystem
+            )
         );
         // Left  ≈ 5.5 m  → PRESET_VFAR_RPM
-        m_playerStick.povLeft().onTrue(
+        m_playerStick.povLeft().toggleOnTrue(
             Commands.runOnce(
                 () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_VFAR_RPM),
                 shooterSubsystem
             )
+        ).onFalse (
+            Commands.runOnce(
+                () -> shooterSubsystem.setFlywheelRPM(0),
+                shooterSubsystem
+            )
+        );
+
+        // ── Turret: right joystick X = manual drive, Y button = zero ─────────
+        // Right joystick X on operator controller drives the turret open-loop.
+        // Use this to find your hard-stop angles — watch "Angle (deg)" in Elastic.
+        turretSubsystem.setDefaultCommand(
+            Commands.run(
+                () -> turretSubsystem.setOpenLoop(
+                    MathUtil.applyDeadband(-m_playerStick.getRightX(), 0.1) * 0.3
+                ),
+                turretSubsystem
+            )
+        );
+        // Y: zero turret — point straight ahead then press this
+        m_playerStick.y().onTrue(
+            Commands.runOnce(turretSubsystem::zeroPosition, turretSubsystem)
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────

@@ -324,34 +324,36 @@ public final class Constants {
          * Format: { distance_meters, target_rpm }
          */
         public static final double[][] RPM_DISTANCE_TABLE = {
-            { 1.50,  1850.0 },  // ★ confirmed
-            { 1.75,  1934.0 },  // interpolated
-            { 2.00,  2020.0 },  // interpolated
-            { 2.25,  2108.0 },  // interpolated
-            { 2.50,  2200.0 },  // ★ confirmed
-            { 2.75,  2296.0 },  // interpolated
-            { 3.00,  2393.0 },  // interpolated
-            { 3.25,  2481.0 },  // interpolated
-            { 3.50,  2561.0 },  // interpolated
-            { 3.75,  2622.0 },  // interpolated
-            { 4.00,  2680.0 },  // ★ confirmed
-            { 4.25,  2775.0 },  // interpolated
-            { 4.50,  2890.0 },  // interpolated
-            { 4.75,  3010.0 },  // interpolated
-            { 5.00,  3148.0 },  // interpolated
-            { 5.25,  3320.0 },  // interpolated
-            { 5.50,  3600.0 },  // ★ confirmed
+            { 1.153,  1850.0 },  // ★ confirmed  (was 1.50 m bumper→face)
+            { 1.400,  1920.0 },  // interpolated
+            { 1.650,  1995.0 },  // interpolated
+            { 1.900,  2075.0 },  // interpolated
+            { 2.153,  2200.0 },  // ★ confirmed  (was 2.50 m bumper→face)
+            { 2.400,  2310.0 },  // interpolated
+            { 2.650,  2430.0 },  // interpolated
+            { 2.900,  2540.0 },  // interpolated
+            { 3.153,  2620.0 },  // interpolated
+            { 3.400,  2650.0 },  // interpolated
+            { 3.653,  2680.0 },  // ★ confirmed  (was 4.00 m bumper→face)
+            { 4.000,  2780.0 },  // interpolated — extrapolated beyond confirmed range, verify on field
+            { 4.400,  2920.0 },  // interpolated — extrapolated, verify on field
+            { 4.800,  3100.0 },  // interpolated — extrapolated, verify on field
+            { 5.153,  3300.0 },  // ⚠ unconfirmed (would be 5.50 m bumper→face) — MEASURE AND UPDATE
         };
 
-        // ── D-Pad operator presets (map directly to confirmed table rows) ──────
+        // ── D-Pad operator presets ────────────────────────────────────────────
+        // Tape distances (bumper→face) shown in comments for field reference.
+        // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
+        // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
         public static final double PRESET_CLOSE_RPM    = 1850.0;
-        public static final double PRESET_CLOSE_DIST_M = 1.5;
-        public static final double PRESET_MID_RPM      = 2200.0;
-        public static final double PRESET_MID_DIST_M   = 2.5;
-        public static final double PRESET_FAR_RPM      = 2680.0;
-        public static final double PRESET_FAR_DIST_M   = 4.0;
-        public static final double PRESET_VFAR_RPM     = 3600.0;
-        public static final double PRESET_VFAR_DIST_M  = 5.5;
+        public static final double PRESET_CLOSE_DIST_M = 1.153; // tape: 1.5 m  ★ confirmed
+        public static final double PRESET_MID_RPM      = 2081.0;
+        public static final double PRESET_MID_DIST_M   = 2.153; // tape: 2.5 m  ★ confirmed
+        public static final double PRESET_FAR_RPM      = 2570.0;
+        public static final double PRESET_FAR_DIST_M   = 3.653; // tape: 4.0 m  ★ confirmed
+        public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
+        public static final double PRESET_VFAR_DIST_M  = 5.153; // tape: 5.5 m  ⚠ unconfirmed
+
 
         /**
          * Interpolates target RPM from RPM_DISTANCE_TABLE using linear
@@ -459,49 +461,33 @@ public final class Constants {
 
     public static final class TurretConstants {
 
-        /** CAN ID for the turret Kraken X44. Set to the correct ID before deploy. */
-        public static final int    TURRET_MOTOR_ID  = 32;           // ← SET ME
+        public static final int    TURRET_MOTOR_ID  = 32;
         public static final String TURRET_CAN_BUS   = "rio";
 
-        /**
-         * Motor turns per one full turret rotation.
-         * Measure your gearbox/belt reduction and set this before deploy.
-         * Example: a 20:1 reduction → 20.0
-         */
-        public static final double TURRET_GEAR_RATIO = 20.0;        // ← SET ME
+        /** Motor turns per one full turret rotation. */
+        public static final double TURRET_GEAR_RATIO = 20.0;
 
-        // ── Soft travel limits ────────────────────────────────────────────────
-        /**
-         * Maximum degrees the turret may rotate to the RIGHT of straight-ahead.
-         * Start conservative (e.g. 90°), then increase until cords are at risk.
-         * The motor will hard-stop at this position via Phoenix software limits.
-         */
-        public static final double TURRET_FORWARD_LIMIT_DEG =  90.0; // ← TUNE ME
+        // ── Cord-safety soft limits ───────────────────────────────────────────
+        // Convention: positive = RIGHT, negative = LEFT (Clockwise_Positive inversion).
+        // Physical hard stops measured on robot: right +279.75°, left -266.22°.
+        // Backed off 15° each side — do NOT increase beyond these without re-checking cords.
+        // FORWARD must always be > REVERSE or Phoenix will reject the config.
+        public static final double TURRET_FORWARD_LIMIT_DEG =  265.0; // right cord limit (+279.75° hard stop − 15°)
+        public static final double TURRET_REVERSE_LIMIT_DEG = -251.0; // left  cord limit (−266.22° hard stop + 15°)
 
-        /**
-         * Maximum degrees the turret may rotate to the LEFT of straight-ahead.
-         * This is a negative value because left is the reverse direction.
-         */
-        public static final double TURRET_REVERSE_LIMIT_DEG = -90.0; // ← TUNE ME
-
-        // ── MotionMagic profile ───────────────────────────────────────────────
-        /** Cruise velocity in mechanism rotations/sec (turret, not motor). */
-        public static final double TURRET_CRUISE_VEL_RPS  = 1.0;    // ← TUNE ME
-        /** Acceleration in mechanism rotations/sec² (turret, not motor). */
-        public static final double TURRET_ACCEL_RPS2      = 2.0;    // ← TUNE ME
+        // ── MotionMagic profile (used during limit-flip) ──────────────────────
+        public static final double TURRET_CRUISE_VEL_RPS = 1.0;
+        public static final double TURRET_ACCEL_RPS2     = 2.0;
 
         // ── Position PID (Slot 0, MotionMagicVoltage) ────────────────────────
-        public static final double TURRET_kP = 24.0;  // ← TUNE ME
+        public static final double TURRET_kP = 24.0;
         public static final double TURRET_kI =  0.0;
-        public static final double TURRET_kD =  0.5;  // ← TUNE ME
-        public static final double TURRET_kS =  0.0;  // static friction — add after SysId
-        public static final double TURRET_kV =  0.0;  // velocity feed-forward — add after SysId
+        public static final double TURRET_kD =  0.5;
+        public static final double TURRET_kS =  0.0;
+        public static final double TURRET_kV =  0.0;
 
-        /** Tolerance for "at target" check (degrees). */
         public static final double TURRET_ANGLE_TOLERANCE_DEG = 1.0;
-
-        /** Stator current limit (Amps). */
-        public static final double TURRET_STATOR_LIMIT_AMPS = 40.0;
+        public static final double TURRET_STATOR_LIMIT_AMPS   = 40.0;
 
         private TurretConstants() {}
     }
