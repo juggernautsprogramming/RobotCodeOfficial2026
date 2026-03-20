@@ -130,7 +130,6 @@ public class TurretSubsystem extends SubsystemBase {
      * full-speed MotionMagic flip to the opposite limit.
      */
     public void setOpenLoop(double power) {
-        m_lastPower  = power;
         double angle = getAngleDeg();
 
         // Hold the flip until the turret arrives (within 5°) or the stick is released
