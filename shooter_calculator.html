@@ -3,555 +3,545 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FRC Shooter · v₀ Calculator</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@300;400;600&display=swap" rel="stylesheet">
+<title>FRC Shooter v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne+Mono&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0d0f14; --surface: #141720; --surface2: #1c2030; --border: #2a2f45;
-    --accent: #00e5ff; --accent2: #7c3aed; --green: #00ff88; --orange: #ff8c00;
-    --red: #ff4466; --text: #e2e8f0; --muted: #64748b;
-    --mono: 'JetBrains Mono', monospace; --sans: 'Space Grotesk', sans-serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg); color: var(--text); font-family: var(--sans);
-    min-height: 100vh; padding: 2rem 1rem;
-    background-image:
-      radial-gradient(ellipse at 20% 0%, rgba(0,229,255,0.04) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 100%, rgba(124,58,237,0.06) 0%, transparent 60%);
-  }
-  .container { max-width: 920px; margin: 0 auto; }
-  .header { margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
-  .header-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
-  .badge {
-    background: var(--accent2); color: white; font-family: var(--mono);
-    font-size: 0.65rem; font-weight: 600; letter-spacing: 0.12em;
-    padding: 0.2rem 0.6rem; border-radius: 3px; text-transform: uppercase;
-  }
-  h1 { font-family: var(--mono); font-size: 1.4rem; font-weight: 700; color: var(--accent); }
-  .subtitle { color: var(--muted); font-size: 0.85rem; font-weight: 300; }
-  .cell { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1.2rem; overflow: hidden; }
-  .cell-label {
-    background: var(--surface2); border-bottom: 1px solid var(--border);
-    padding: 0.5rem 1rem; font-family: var(--mono); font-size: 0.7rem;
-    color: var(--muted); letter-spacing: 0.08em; display: flex; align-items: center; gap: 0.5rem;
-  }
-  .cell-label::before { content: 'In [ ]'; color: var(--accent); font-weight: 600; }
-  .cell-body { padding: 1.4rem 1.6rem; }
-  .inputs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
-  .input-group { display: flex; flex-direction: column; gap: 0.6rem; }
-  .input-header { display: flex; justify-content: space-between; align-items: baseline; }
-  label { font-family: var(--mono); font-size: 0.8rem; color: var(--accent); font-weight: 600; }
-  .label-desc { font-size: 0.72rem; color: var(--muted); font-family: var(--sans); font-weight: 300; }
-  .value-display { font-family: var(--mono); font-size: 0.95rem; color: var(--green); font-weight: 600; min-width: 5rem; text-align: right; }
-  input[type="range"] {
-    -webkit-appearance: none; width: 100%; height: 3px;
-    background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
-  }
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
-    background: var(--accent); cursor: pointer;
-    box-shadow: 0 0 8px rgba(0,229,255,0.5); transition: transform 0.1s;
-  }
-  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.3); }
-  .range-bounds { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.62rem; color: var(--muted); margin-top: -0.1rem; }
-  .results-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.4rem; }
-  .result-card {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-    padding: 1rem 1.2rem; text-align: center; position: relative; overflow: hidden;
-  }
-  .result-card::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: var(--accent); }
-  .result-card.secondary::after { background: var(--accent2); }
-  .result-card.tertiary::after  { background: var(--orange); }
-  .result-card.quaternary::after { background: var(--green); }
-  .result-label { font-family: var(--mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.4rem; }
-  .result-value { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; color: var(--accent); line-height: 1; }
-  .result-card.secondary .result-value { color: #a78bfa; }
-  .result-card.tertiary  .result-value { color: var(--orange); }
-  .result-card.quaternary .result-value { color: var(--green); }
-  .result-unit { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); margin-top: 0.2rem; }
-  .error-banner {
-    background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3);
-    border-radius: 6px; padding: 0.8rem 1.2rem; font-family: var(--mono);
-    font-size: 0.8rem; color: var(--red); display: none; margin-bottom: 1rem;
-  }
-  .canvas-wrap { border-radius: 6px; overflow: hidden; background: var(--surface2); border: 1px solid var(--border); }
-  canvas { display: block; width: 100%; }
-
-  /* Optimal callout */
-  .optimal-callout {
-    background: rgba(0,229,255,0.07); border: 1px solid rgba(0,229,255,0.25);
-    border-radius: 8px; padding: 1.2rem 1.6rem; display: flex;
-    align-items: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 1.4rem;
-  }
-  .optimal-callout .oc-label { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.2rem; }
-  .optimal-callout .oc-value { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; color: var(--accent); }
-  .optimal-callout .oc-unit  { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
-  .optimal-callout .oc-note  { font-size: 0.8rem; color: var(--text); flex: 1; min-width: 200px; }
-  .b-button {
-    background: rgba(124,58,237,0.2); border: 1px solid var(--accent2);
-    color: #c4b5fd; font-family: var(--mono); font-size: 0.78rem;
-    padding: 0.5rem 1rem; border-radius: 6px; white-space: nowrap;
-  }
-
-  /* Score bar */
-  .score-bar-wrap { display: flex; align-items: center; gap: 0.6rem; }
-  .score-bar-bg { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
-  .score-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width 0.2s; }
-  .score-val { font-family: var(--mono); font-size: 0.75rem; color: var(--green); width: 3.2rem; text-align: right; }
-
-  /* Tables */
-  .sens-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.78rem; }
-  .sens-table th { text-align: left; padding: 0.5rem 0.8rem; color: var(--muted); font-weight: 400; font-size: 0.68rem; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); }
-  .sens-table td { padding: 0.45rem 0.8rem; border-bottom: 1px solid rgba(42,47,69,0.5); }
-  .sens-table tr:last-child td { border-bottom: none; }
-  .sens-table .highlight-row td { background: rgba(0,229,255,0.07); }
-  .sens-table .optimal-row td { background: rgba(0,255,136,0.07); color: var(--green); }
-  .sens-table td:first-child { color: var(--muted); }
-  .sens-table td.good { color: var(--green); }
-  .sens-table td.warn { color: var(--orange); }
-  .sens-table td.bad  { color: var(--red); }
-
-  @media (max-width: 640px) {
-    .inputs-grid { grid-template-columns: 1fr; }
-    .results-grid { grid-template-columns: 1fr 1fr; }
-    .optimal-callout { flex-direction: column; gap: 1rem; }
-  }
+:root{
+  --bg:#080b0f;--s1:#0e1117;--s2:#141923;--s3:#1c2535;
+  --border:#1f2d3d;--border2:#162030;
+  --hi:#00d4ff;--lo:#ff6b35;--green:#39d98a;
+  --yellow:#fbbf24;--red:#f04e4e;
+  --dim:#3d5166;--dimmer:#243040;
+  --text:#c8d8e8;--muted:#4a6070;
+  --mono:'Syne Mono',monospace;--sans:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;
+  background-image:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,255,255,.007) 2px,rgba(255,255,255,.007) 4px),
+  radial-gradient(ellipse 80% 50% at 50% -10%,rgba(0,212,255,.04) 0%,transparent 60%);}
+.topbar{border-bottom:1px solid var(--border);background:var(--s1);display:flex;align-items:center;}
+.brand{padding:.75rem 1.5rem;border-right:1px solid var(--border);display:flex;align-items:center;gap:.8rem;}
+.brand-icon{width:26px;height:26px;background:var(--hi);border-radius:4px;display:flex;align-items:center;justify-content:center;}
+.brand-icon svg{width:14px;height:14px;fill:#000;}
+.brand h1{font-family:var(--sans);font-size:.9rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+.tabs{display:flex;}
+.tab{padding:.75rem 1.3rem;font-family:var(--mono);font-size:.66rem;color:var(--muted);border-right:1px solid var(--border);cursor:pointer;transition:color .15s,background .15s;letter-spacing:.06em;}
+.tab.active{color:var(--hi);background:rgba(0,212,255,.05);}
+.tab:hover:not(.active){color:var(--text);}
+.status{margin-left:auto;padding:0 1.3rem;display:flex;align-items:center;gap:.5rem;font-family:var(--mono);font-size:.63rem;color:var(--green);}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.workspace{display:grid;grid-template-columns:330px 1fr;min-height:calc(100vh - 46px);}
+.left{border-right:1px solid var(--border);background:var(--s1);overflow-y:auto;}
+.sec{border-bottom:1px solid var(--border2);padding:1.1rem 1.2rem;}
+.sec-t{font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:.9rem;display:flex;align-items:center;gap:.5rem;}
+.sec-t::before{content:'';width:3px;height:3px;border-radius:50%;background:var(--hi);}
+.slg{margin-bottom:.9rem;}
+.slr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.3rem;}
+.sll{font-family:var(--mono);font-size:.68rem;color:var(--hi);}
+.slv{font-family:var(--mono);font-size:.8rem;color:var(--green);}
+.sld{font-family:var(--mono);font-size:.58rem;color:var(--muted);margin-top:.12rem;}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--s3);border-radius:2px;outline:none;cursor:pointer;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--hi);cursor:pointer;box-shadow:0 0 6px rgba(0,212,255,.6);transition:transform .12s;}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.4);}
+input[type=range]:disabled{opacity:.35;cursor:not-allowed;}
+.slb{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.54rem;color:var(--dimmer);}
+.badge-fixed{display:inline-flex;align-items:center;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.22);border-radius:3px;padding:.18rem .55rem;font-family:var(--mono);font-size:.63rem;color:var(--yellow);margin-bottom:.6rem;}
+.calcards{display:grid;grid-template-columns:1fr 1fr;gap:.55rem;margin-top:.75rem;}
+.calcard{background:var(--s2);border:1px solid var(--border2);border-radius:4px;padding:.65rem .75rem;border-left:2px solid var(--hi);}
+.calcard-dist{font-family:var(--mono);font-size:.56rem;color:var(--muted);margin-bottom:.18rem;}
+.calcard-rpm{font-family:var(--mono);font-size:1rem;color:var(--hi);}
+.calcard-eta{font-family:var(--mono);font-size:.58rem;color:var(--green);margin-top:.12rem;}
+.right{display:flex;flex-direction:column;}
+.readouts{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border);}
+.ro{padding:1.3rem 1.4rem;border-right:1px solid var(--border);position:relative;}
+.ro:last-child{border-right:none;}
+.ro::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.ro-rpm::after{background:var(--hi);}
+.ro-v0::after{background:var(--green);}
+.ro-ea::after{background:var(--lo);}
+.ro-t::after{background:var(--yellow);}
+.ro-lbl{font-family:var(--mono);font-size:.56rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:.45rem;}
+.ro-val{font-family:var(--mono);font-size:1.9rem;line-height:1;}
+.ro-rpm .ro-val{color:var(--hi);}
+.ro-v0 .ro-val{color:var(--green);}
+.ro-ea .ro-val{color:var(--lo);}
+.ro-t .ro-val{color:var(--yellow);}
+.ro-unit{font-family:var(--mono);font-size:.58rem;color:var(--muted);margin-top:.22rem;}
+.ca{flex:1;display:flex;flex-direction:column;background:var(--bg);}
+.ca-bar{padding:.48rem 1.1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;background:var(--s1);font-family:var(--mono);font-size:.6rem;color:var(--dim);}
+.ca-wrap{flex:1;padding:.5rem;}
+canvas{display:block;width:100%;border-radius:4px;}
+.infobar{border-top:1px solid var(--border);background:var(--s1);display:flex;align-items:center;gap:1.8rem;padding:.48rem 1.3rem;font-family:var(--mono);font-size:.6rem;flex-wrap:wrap;}
+.ib{display:flex;align-items:center;gap:.38rem;color:var(--muted);}
+.ib .dot{width:6px;height:6px;border-radius:50%;}
+.ibv{color:var(--text);}
+.tc{display:none;flex-direction:column;flex:1;}
+.tc.active{display:flex;}
+.tbar{padding:.52rem 1.1rem;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:.6rem;color:var(--dim);display:flex;align-items:center;gap:.6rem;background:var(--s2);}
+.tscroll{overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 160px);}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.7rem;}
+thead th{padding:.42rem .9rem;text-align:left;font-size:.58rem;letter-spacing:.08em;color:var(--dim);font-weight:400;text-transform:uppercase;background:var(--s2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1;}
+tbody td{padding:.36rem .9rem;border-bottom:1px solid var(--border2);}
+tbody tr:hover td{background:rgba(255,255,255,.02);}
+.rconf td{background:rgba(0,212,255,.04);}
+.rcur td{background:rgba(255,107,53,.05);}
+.chi{color:var(--hi);}.clo{color:var(--lo);}.cg{color:var(--green);}.cy{color:var(--yellow);}.cr{color:var(--red);}.cm{color:var(--muted);}
+.cal-pad{padding:1.3rem 1.5rem;}
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.9rem;margin-bottom:1.2rem;}
+.diag-card{background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:.9rem 1rem;}
+.diag-dist{font-family:var(--mono);font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.4rem;}
+.diag-model{font-family:var(--mono);font-size:.76rem;color:var(--red);margin-bottom:.18rem;}
+.diag-real{font-family:var(--mono);font-size:.76rem;color:var(--hi);margin-bottom:.18rem;}
+.diag-eta{font-family:var(--mono);font-size:.76rem;color:var(--green);}
+.diag-ratio{font-family:var(--mono);font-size:.68rem;color:var(--yellow);margin-top:.25rem;}
+.diag-exp{background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:1.1rem 1.3rem;font-family:var(--mono);font-size:.7rem;line-height:1.85;color:var(--text);}
+@media(max-width:860px){
+  .workspace{grid-template-columns:1fr;}
+  .left{border-right:none;border-bottom:1px solid var(--border);}
+  .readouts{grid-template-columns:1fr 1fr;}
+}
 </style>
 </head>
 <body>
-<div class="container">
 
-  <div class="header">
-    <div class="header-top">
-      <span class="badge">FRC 2026</span>
-      <h1>Shooter Calculator</h1>
-    </div>
-    <p class="subtitle">Physics solver · matches ShotCalculator.java exactly · press B to drive to optimal standoff</p>
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon"><svg viewBox="0 0 16 16"><path d="M8 1L1 14h14z"/></svg></div>
+    <h1>Shooter v2</h1>
   </div>
-
-  <!-- ROBOT CONSTANTS (pre-filled to match Constants.java) -->
-  <div class="cell">
-    <div class="cell-label">ROBOT HARDWARE — match Constants.java → ShooterConstants</div>
-    <div class="cell-body">
-      <div class="inputs-grid">
-        <div class="input-group">
-          <div class="input-header">
-            <label>h₁ — Shooter exit height</label>
-            <span class="value-display" id="h1-display">0.52 m</span>
-          </div>
-          <input type="range" id="h1" min="0.1" max="1.5" step="0.01" value="0.52">
-          <div class="range-bounds"><span>0.1 m</span><span>1.5 m</span></div>
-          <span class="label-desc">SHOOTER_EXIT_HEIGHT_METERS</span>
-        </div>
-        <div class="input-group">
-          <div class="input-header">
-            <label>h₂ — Hub target height</label>
-            <span class="value-display" id="h2-display">2.64 m</span>
-          </div>
-          <input type="range" id="h2" min="0.5" max="4.0" step="0.01" value="2.64">
-          <div class="range-bounds"><span>0.5 m</span><span>4.0 m</span></div>
-          <span class="label-desc">HUB_TARGET_HEIGHT_METERS</span>
-        </div>
-        <div class="input-group">
-          <div class="input-header">
-            <label>Wheel diameter</label>
-            <span class="value-display" id="wd-display">4.0 in</span>
-          </div>
-          <input type="range" id="wd" min="2" max="8" step="0.25" value="4.0">
-          <div class="range-bounds"><span>2 in</span><span>8 in</span></div>
-          <span class="label-desc">WHEEL_DIAMETER_INCHES</span>
-        </div>
-        <div class="input-group">
-          <div class="input-header">
-            <label>η — Efficiency</label>
-            <span class="value-display" id="eta-display">0.85</span>
-          </div>
-          <input type="range" id="eta" min="0.5" max="1.0" step="0.01" value="0.85">
-          <div class="range-bounds"><span>0.50</span><span>1.00</span></div>
-          <span class="label-desc">EFFICIENCY (ball vs wheel surface speed)</span>
-        </div>
-      </div>
-    </div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('live')">Live Shot</div>
+    <div class="tab" onclick="switchTab('sweep')">Distance Sweep</div>
+    <div class="tab" onclick="switchTab('cal')">Calibration</div>
   </div>
-
-  <!-- MANUAL SHOT EXPLORER -->
-  <div class="cell">
-    <div class="cell-label">MANUAL SHOT EXPLORER — drag to explore any angle / distance combo</div>
-    <div class="cell-body">
-      <div class="inputs-grid">
-        <div class="input-group">
-          <div class="input-header">
-            <label>θ — Launch angle</label>
-            <span class="value-display" id="theta-display">55.0°</span>
-          </div>
-          <input type="range" id="theta" min="10" max="80" step="0.5" value="55">
-          <div class="range-bounds"><span>10°</span><span>80°</span></div>
-          <span class="label-desc">Hood angle above horizontal</span>
-        </div>
-        <div class="input-group">
-          <div class="input-header">
-            <label>d — Distance to hub</label>
-            <span class="value-display" id="d-display">3.00 m</span>
-          </div>
-          <input type="range" id="d" min="0.5" max="7.0" step="0.05" value="3.0">
-          <div class="range-bounds"><span>0.5 m</span><span>7.0 m</span></div>
-          <span class="label-desc">Horizontal shooter-exit → hub centre</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- RESULTS -->
-  <div class="cell">
-    <div class="cell-label">OUTPUT — current angle + distance</div>
-    <div class="cell-body">
-      <div class="error-banner" id="error-banner">⚠ Invalid — ball cannot reach target at this angle and distance.</div>
-      <div class="results-grid" id="results-grid">
-        <div class="result-card">
-          <div class="result-label">v₀ · exit speed</div>
-          <div class="result-value" id="out-v0">—</div>
-          <div class="result-unit">m/s</div>
-        </div>
-        <div class="result-card quaternary">
-          <div class="result-label">Motor RPM</div>
-          <div class="result-value" id="out-rpm">—</div>
-          <div class="result-unit">RPM</div>
-        </div>
-        <div class="result-card secondary">
-          <div class="result-label">t · flight time</div>
-          <div class="result-value" id="out-t">—</div>
-          <div class="result-unit">seconds</div>
-        </div>
-        <div class="result-card tertiary">
-          <div class="result-label">Entry angle</div>
-          <div class="result-value" id="out-ea">—</div>
-          <div class="result-unit">degrees (↑ = better)</div>
-        </div>
-      </div>
-      <div style="margin-bottom:1rem;">
-        <div style="display:flex;align-items:center;gap:0.8rem;margin-bottom:0.4rem;">
-          <span style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);">SHOT SCORE</span>
-          <div class="score-bar-bg"><div class="score-bar-fill" id="score-bar" style="width:0%"></div></div>
-          <span class="score-val" id="out-score">—</span>
-        </div>
-        <span style="font-size:0.72rem;color:var(--muted);">Weights: t=0.15 · v₀=0.15 · entry=0.55 · RPM=0.15 (matches ShotCalculator.java)</span>
-      </div>
-      <div class="canvas-wrap">
-        <canvas id="traj" height="220"></canvas>
-      </div>
-    </div>
-  </div>
-
-  <!-- OPTIMAL DISTANCE FINDER -->
-  <div class="cell">
-    <div class="cell-label">OPTIMAL STANDOFF DISTANCE — matches ShotCalculator.OPTIMAL_STANDOFF_M</div>
-    <div class="cell-body">
-      <div class="optimal-callout">
-        <div>
-          <div class="oc-label">Optimal standoff</div>
-          <div><span class="oc-value" id="opt-dist">—</span> <span class="oc-unit">metres from hub centre</span></div>
-        </div>
-        <div>
-          <div class="oc-label">Best angle</div>
-          <div><span class="oc-value" id="opt-angle" style="color:#a78bfa">—</span> <span class="oc-unit">degrees</span></div>
-        </div>
-        <div>
-          <div class="oc-label">Motor RPM</div>
-          <div><span class="oc-value" id="opt-rpm" style="color:var(--green)">—</span> <span class="oc-unit">RPM</span></div>
-        </div>
-        <div>
-          <div class="oc-label">Entry angle</div>
-          <div><span class="oc-value" id="opt-ea" style="color:var(--orange)">—</span> <span class="oc-unit">degrees</span></div>
-        </div>
-        <div class="oc-note">
-          Press <span class="b-button">B button</span> on the controller to drive to this distance and face the hub automatically.
-          The robot uses this distance from <code>ShotCalculator.OPTIMAL_STANDOFF_M</code>.
-        </div>
-      </div>
-      <table class="sens-table">
-        <thead>
-          <tr>
-            <th>Distance (m)</th>
-            <th>Best θ (°)</th>
-            <th>v₀ (m/s)</th>
-            <th>RPM</th>
-            <th>Entry angle</th>
-            <th>Score</th>
-            <th>Note</th>
-          </tr>
-        </thead>
-        <tbody id="dist-sweep-body"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ANGLE SWEEP (at current distance) -->
-  <div class="cell">
-    <div class="cell-label">ANGLE SWEEP — v₀ and RPM at current distance</div>
-    <div class="cell-body">
-      <table class="sens-table">
-        <thead>
-          <tr>
-            <th>θ (°)</th>
-            <th>v₀ (m/s)</th>
-            <th>RPM</th>
-            <th>Flight time (s)</th>
-            <th>Entry angle (°)</th>
-            <th>Score</th>
-            <th>Note</th>
-          </tr>
-        </thead>
-        <tbody id="angle-sweep-body"></tbody>
-      </table>
-    </div>
-  </div>
-
+  <div class="status"><div class="sdot"></div>LIVE</div>
 </div>
+
+<div class="workspace">
+  <div class="left">
+    <div class="sec">
+      <div class="sec-t">Hood angle</div>
+      <div class="badge-fixed">&#9888; FIXED &#8212; cannot adjust</div>
+      <div class="slg">
+        <div class="slr"><span class="sll">&#952; &#8212; Launch angle</span><span class="slv">61.5&#176;</span></div>
+        <input type="range" min="20" max="75" step="0.5" value="61.5" disabled>
+        <div class="sld">Hood is physically locked at 61.5&#176;</div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-t">Shot explorer</div>
+      <div class="slg">
+        <div class="slr"><span class="sll">d &#8212; Distance to hub</span><span class="slv" id="dDisp">3.00 m</span></div>
+        <input type="range" id="slD" min="0.5" max="7.0" step="0.05" value="3.0">
+        <div class="slb"><span>0.5 m</span><span>7.0 m</span></div>
+        <div class="sld">Horizontal shooter-exit &#8594; hub centre</div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-t">Robot constants</div>
+      <div class="slg">
+        <div class="slr"><span class="sll">h&#8321; &#8212; Exit height</span><span class="slv" id="h1Disp">0.52 m</span></div>
+        <input type="range" id="slH1" min="0.1" max="1.5" step="0.01" value="0.52">
+        <div class="slb"><span>0.1 m</span><span>1.5 m</span></div>
+        <div class="sld">SHOOTER_EXIT_HEIGHT_METERS</div>
+      </div>
+      <div class="slg">
+        <div class="slr"><span class="sll">h&#8322; &#8212; Hub height</span><span class="slv" id="h2Disp">2.64 m</span></div>
+        <input type="range" id="slH2" min="0.5" max="4.0" step="0.01" value="2.64">
+        <div class="slb"><span>0.5 m</span><span>4.0 m</span></div>
+        <div class="sld">HUB_TARGET_HEIGHT_METERS</div>
+      </div>
+      <div class="slg">
+        <div class="slr"><span class="sll">Wheel &#8960;</span><span class="slv" id="wdDisp">4.00 in</span></div>
+        <input type="range" id="slWd" min="2" max="8" step="0.25" value="4.0">
+        <div class="slb"><span>2 in</span><span>8 in</span></div>
+        <div class="sld">WHEEL_DIAMETER_INCHES</div>
+      </div>
+      <div class="slg">
+        <div class="slr"><span class="sll">&#951; &#8212; Efficiency (empirical)</span><span class="slv" id="etaDisp">0.424</span></div>
+        <input type="range" id="slEta" min="0.30" max="0.70" step="0.001" value="0.424">
+        <div class="slb"><span>0.30</span><span>0.70</span></div>
+        <div class="sld">Back-calc from field data. Was 0.85 &#8212; corrected.</div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-t">Confirmed field points</div>
+      <div class="calcards" id="calCards"></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div id="tabLive" class="tc active">
+      <div class="readouts">
+        <div class="ro ro-rpm"><div class="ro-lbl">Target RPM</div><div class="ro-val" id="outRpm">&#8212;</div><div class="ro-unit">interpolated</div></div>
+        <div class="ro ro-v0"> <div class="ro-lbl">v&#8320; needed</div><div class="ro-val" id="outV0">&#8212;</div><div class="ro-unit">m/s (physics)</div></div>
+        <div class="ro ro-ea"> <div class="ro-lbl">Entry angle</div><div class="ro-val" id="outEa">&#8212;</div><div class="ro-unit">degrees</div></div>
+        <div class="ro ro-t">  <div class="ro-lbl">Flight time</div><div class="ro-val" id="outT">&#8212;</div><div class="ro-unit">seconds</div></div>
+      </div>
+      <div class="ca">
+        <div class="ca-bar">TRAJECTORY &#8212; &#952; = 61.5&#176; (fixed) &nbsp;<span id="trajInfo" style="color:var(--text)"></span></div>
+        <div class="ca-wrap" id="caWrap"><canvas id="traj" height="320"></canvas></div>
+      </div>
+      <div class="infobar">
+        <div class="ib"><div class="dot" style="background:var(--hi)"></div><span>Confirmed</span></div>
+        <div class="ib"><div class="dot" style="background:var(--lo)"></div><span>Interpolated</span></div>
+        <div class="ib" id="ibNearest"></div>
+        <div class="ib" id="ibEntry"></div>
+      </div>
+    </div>
+
+    <div id="tabSweep" class="tc">
+      <div class="tbar">FULL DISTANCE SWEEP &#8212; 0.25 m steps &nbsp; &#9733; = field confirmed</div>
+      <div class="tscroll">
+        <table>
+          <thead><tr>
+            <th>Dist (m)</th><th>Interp RPM</th><th>v&#8320; (m/s)</th>
+            <th>Entry &#176;</th><th>Flight (s)</th><th>Source</th><th>Status</th>
+          </tr></thead>
+          <tbody id="sweepBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tabCal" class="tc">
+      <div class="tbar">EFFICIENCY DIAGNOSIS &#8212; model vs reality</div>
+      <div class="cal-pad">
+        <div class="diag-grid" id="diagGrid"></div>
+        <div class="diag-exp" id="diagExp"></div>
+      </div>
+      <div class="tbar">RPM TABLE &#8212; interpolated every 0.25 m</div>
+      <div class="tscroll">
+        <table>
+          <thead><tr>
+            <th>Dist (m)</th><th>RPM</th><th>&#916; vs model (&#951;=0.85)</th><th>&#951;_real</th><th>Source</th>
+          </tr></thead>
+          <tbody id="calBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-  // ── Constants (mirror ShooterConstants.java) ───────────────────────────────
-  const G = 9.81;
-  const SCORE_WEIGHTS  = [0.15, 0.15, 0.55, 0.15]; // t, v0, entry, rpm
-  const MIN_ENTRY_DEG  = 25.0;
-  const MAX_MOTOR_RPM  = 6000.0;
-  const MIN_ANGLE      = 20.0;
-  const MAX_ANGLE      = 75.0;
-  const ANGLE_STEP     = 0.5;
-  const DIST_MIN       = 1.5;
-  const DIST_MAX       = 6.0;
-  const DIST_STEP      = 0.10;
-  const GEAR_RATIO     = 1.0;
+var G = 9.81;
+var THETA = 61.5;
+var CAL = [
+  {d:1.5,rpm:1850},{d:2.5,rpm:2200},
+  {d:4.0,rpm:2680},{d:5.5,rpm:3600}
+];
 
-  // ── Sliders ────────────────────────────────────────────────────────────────
-  const elH1    = document.getElementById('h1');
-  const elH2    = document.getElementById('h2');
-  const elWd    = document.getElementById('wd');
-  const elEta   = document.getElementById('eta');
-  const elTheta = document.getElementById('theta');
-  const elD     = document.getElementById('d');
+function solvePhysics(d,thetaDeg,h1,h2){
+  var h=h2-h1, th=thetaDeg*Math.PI/180;
+  var cosT=Math.cos(th), sinT=Math.sin(th);
+  var denom=2*cosT*cosT*(d*Math.tan(th)-h);
+  if(denom<=0||d<=0) return null;
+  var v0=d*Math.sqrt(G/denom);
+  var t=d/(v0*cosT);
+  var ea=Math.atan2(-(v0*sinT-G*t),v0*cosT)*180/Math.PI;
+  return {v0:v0,t:t,ea:ea};
+}
 
-  // ── Physics ────────────────────────────────────────────────────────────────
-  function solvePhysics(d, thetaDeg, h1, h2) {
-    const h     = h2 - h1;
-    const th    = thetaDeg * Math.PI / 180;
-    const cosT  = Math.cos(th);
-    const sinT  = Math.sin(th);
-    const denom = 2 * cosT * cosT * (d * Math.tan(th) - h);
-    if (denom <= 0 || d <= 0) return null;
-    const v0     = d * Math.sqrt(G / denom);
-    const t      = d / (v0 * cosT);
-    const vyFin  = v0 * sinT - G * t;
-    const ea     = Math.atan2(-vyFin, v0 * cosT) * 180 / Math.PI;
-    return { v0, t, ea };
+function mdlRPM(v0,wdIn,eta){
+  var wdM=wdIn*0.0254;
+  return (v0/eta)/(Math.PI*wdM)*60;
+}
+
+function realEta(dist,rpm,h1,h2,wdIn){
+  var p=solvePhysics(dist,THETA,h1,h2);
+  if(!p) return null;
+  var surf=(rpm/60)*Math.PI*(wdIn*0.0254);
+  return p.v0/surf;
+}
+
+// spline
+function buildSpline(){
+  var n=CAL.length, x=[],y=[],h=[],delta=[],m=[];
+  for(var i=0;i<n;i++){x[i]=CAL[i].d;y[i]=CAL[i].rpm;}
+  for(var i=0;i<n-1;i++){h[i]=x[i+1]-x[i];delta[i]=(y[i+1]-y[i])/h[i];}
+  m[0]=delta[0];
+  for(var i=1;i<n-1;i++) m[i]=(delta[i-1]+delta[i])/2;
+  m[n-1]=delta[n-2];
+  for(var i=0;i<n-1;i++){
+    if(Math.abs(delta[i])<1e-10){m[i]=0;m[i+1]=0;continue;}
+    var a=m[i]/delta[i],b=m[i+1]/delta[i];
+    if(a<0||b<0){m[i]=0;m[i+1]=0;continue;}
+    var sq=a*a+b*b;
+    if(sq>9){var tau=3/Math.sqrt(sq);m[i]*=tau;m[i+1]*=tau;}
   }
+  return {x:x,y:y,m:m,n:n};
+}
+var SP=buildSpline();
 
-  function toRPM(v0, wdIn, eta) {
-    const wdM = wdIn * 0.0254;
-    const surfaceSpeed = v0 / eta;
-    const wheelRPM = (surfaceSpeed / (Math.PI * wdM)) * 60;
-    return wheelRPM * GEAR_RATIO;
-  }
+function interpRPM(d){
+  var x=SP.x,y=SP.y,m=SP.m,n=SP.n;
+  if(d<=x[0])   return y[0]+m[0]*(d-x[0]);
+  if(d>=x[n-1]) return y[n-1]+m[n-1]*(d-x[n-1]);
+  var lo=0,hi=n-1;
+  while(hi-lo>1){var mid=(lo+hi)>>1; if(x[mid]<=d) lo=mid; else hi=mid;}
+  var seg=x[lo+1]-x[lo],t=(d-x[lo])/seg,t2=t*t,t3=t2*t;
+  return (2*t3-3*t2+1)*y[lo]+(t3-2*t2+t)*seg*m[lo]+(-2*t3+3*t2)*y[lo+1]+(t3-t2)*seg*m[lo+1];
+}
 
-  function score(p, rpm) {
-    const tS   = Math.max(0, 1 - p.t   / 1.2);
-    const v0S  = Math.max(0, 1 - p.v0  / 20);
-    const eaS  = Math.min(1, p.ea / 65);
-    const rpmS = Math.max(0, 1 - rpm   / 6000);
-    const w = SCORE_WEIGHTS;
-    return w[0]*tS + w[1]*v0S + w[2]*eaS + w[3]*rpmS;
-  }
+function getV(){
+  return{
+    d:parseFloat(document.getElementById('slD').value),
+    h1:parseFloat(document.getElementById('slH1').value),
+    h2:parseFloat(document.getElementById('slH2').value),
+    wd:parseFloat(document.getElementById('slWd').value),
+    eta:parseFloat(document.getElementById('slEta').value)
+  };
+}
 
-  // Best angle for a given distance
-  function bestAngleResult(d, h1, h2, wdIn, eta) {
-    let best = null, bestScore = -1, bestAngle = MIN_ANGLE;
-    for (let th = MIN_ANGLE; th <= MAX_ANGLE; th += ANGLE_STEP) {
-      const p = solvePhysics(d, th, h1, h2);
-      if (!p) continue;
-      if (p.ea < MIN_ENTRY_DEG) continue;
-      const rpm = toRPM(p.v0, wdIn, eta);
-      if (rpm > MAX_MOTOR_RPM) continue;
-      const s = score(p, rpm);
-      if (s > bestScore) { bestScore = s; best = p; bestAngle = th; }
-    }
-    if (!best) return null;
-    return { ...best, angle: bestAngle, rpm: toRPM(best.v0, wdIn, eta), sc: bestScore };
-  }
+function update(){
+  var v=getV();
+  document.getElementById('dDisp').textContent=v.d.toFixed(2)+' m';
+  document.getElementById('h1Disp').textContent=v.h1.toFixed(2)+' m';
+  document.getElementById('h2Disp').textContent=v.h2.toFixed(2)+' m';
+  document.getElementById('wdDisp').textContent=v.wd.toFixed(2)+' in';
+  document.getElementById('etaDisp').textContent=v.eta.toFixed(3);
 
-  // ── Update ─────────────────────────────────────────────────────────────────
-  function update() {
-    const h1    = parseFloat(elH1.value);
-    const h2    = parseFloat(elH2.value);
-    const wdIn  = parseFloat(elWd.value);
-    const eta   = parseFloat(elEta.value);
-    const theta = parseFloat(elTheta.value);
-    const d     = parseFloat(elD.value);
+  var rpm=interpRPM(v.d);
+  var p=solvePhysics(v.d,THETA,v.h1,v.h2);
 
-    document.getElementById('h1-display').textContent    = h1.toFixed(2) + ' m';
-    document.getElementById('h2-display').textContent    = h2.toFixed(2) + ' m';
-    document.getElementById('wd-display').textContent    = wdIn.toFixed(2) + ' in';
-    document.getElementById('eta-display').textContent   = eta.toFixed(2);
-    document.getElementById('theta-display').textContent = theta.toFixed(1) + '°';
-    document.getElementById('d-display').textContent     = d.toFixed(2) + ' m';
+  document.getElementById('outRpm').textContent=p?Math.round(rpm).toLocaleString():'—';
+  document.getElementById('outV0').textContent=p?p.v0.toFixed(3):'—';
+  document.getElementById('outEa').textContent=p?p.ea.toFixed(1)+'\u00b0':'—';
+  document.getElementById('outT').textContent=p?p.t.toFixed(4):'—';
 
-    // Manual shot
-    const p    = solvePhysics(d, theta, h1, h2);
-    const err  = document.getElementById('error-banner');
-    const grid = document.getElementById('results-grid');
-    if (!p) {
-      err.style.display  = 'block';
-      grid.style.opacity = '0.3';
-      ['out-v0','out-rpm','out-t','out-ea','out-score'].forEach(id =>
-        document.getElementById(id).textContent = '—');
-      document.getElementById('score-bar').style.width = '0%';
+  if(p){
+    document.getElementById('trajInfo').textContent=
+      'd='+v.d.toFixed(2)+'m | RPM='+Math.round(rpm).toLocaleString()+
+      ' | v\u2080='+p.v0.toFixed(2)+' m/s | entry='+p.ea.toFixed(1)+'\u00b0';
+
+    var near=CAL[0];
+    for(var i=1;i<CAL.length;i++) if(Math.abs(CAL[i].d-v.d)<Math.abs(near.d-v.d)) near=CAL[i];
+    var isConf=Math.abs(near.d-v.d)<0.01;
+    var nb=document.getElementById('ibNearest');
+    if(isConf){
+      nb.innerHTML='<div class="dot" style="background:var(--hi)"></div><span class="ibv">\u2605 Confirmed @ '+near.d+'m \u2192 '+near.rpm+' RPM</span>';
     } else {
-      err.style.display  = 'none';
-      grid.style.opacity = '1';
-      const rpm = toRPM(p.v0, wdIn, eta);
-      const sc  = score(p, rpm);
-      document.getElementById('out-v0').textContent  = p.v0.toFixed(3);
-      document.getElementById('out-rpm').textContent = Math.round(rpm).toLocaleString();
-      document.getElementById('out-t').textContent   = p.t.toFixed(4);
-      document.getElementById('out-ea').textContent  = p.ea.toFixed(1) + '°';
-      document.getElementById('out-score').textContent = sc.toFixed(3);
-      document.getElementById('score-bar').style.width = (sc * 100).toFixed(1) + '%';
-      drawTrajectory(d, theta, h1, h2, p.v0, p.t);
+      nb.innerHTML='<div class="dot" style="background:var(--lo)"></div><span>Nearest: '+near.d+'m</span><span class="ibv" style="margin-left:.35rem">'+near.rpm+' RPM</span>';
     }
-
-    // Optimal distance finder
-    let optDist = DIST_MIN, optRes = null, optBestScore = -1;
-    const rows = [];
-    for (let dd = DIST_MIN; dd <= DIST_MAX + 0.001; dd += DIST_STEP) {
-      const r = bestAngleResult(dd, h1, h2, wdIn, eta);
-      rows.push({ d: dd, r });
-      if (r && r.sc > optBestScore) { optBestScore = r.sc; optDist = dd; optRes = r; }
-    }
-
-    if (optRes) {
-      document.getElementById('opt-dist').textContent  = optDist.toFixed(2);
-      document.getElementById('opt-angle').textContent = optRes.angle.toFixed(1) + '°';
-      document.getElementById('opt-rpm').textContent   = Math.round(optRes.rpm).toLocaleString();
-      document.getElementById('opt-ea').textContent    = optRes.ea.toFixed(1) + '°';
-    }
-
-    const distBody = document.getElementById('dist-sweep-body');
-    distBody.innerHTML = '';
-    rows.forEach(({ d: dd, r }) => {
-      const tr = document.createElement('tr');
-      const isOpt = Math.abs(dd - optDist) < 0.001;
-      if (isOpt) tr.classList.add('optimal-row');
-      else if (Math.abs(dd - d) < DIST_STEP / 2) tr.classList.add('highlight-row');
-      if (!r) {
-        tr.innerHTML = `<td>${dd.toFixed(2)}</td><td class="bad" colspan="6">no valid angle</td>`;
-      } else {
-        const note = r.ea < 30 ? 'flat ⚠' : r.ea < 40 ? 'low arc' : r.ea < 55 ? 'good ✓' : 'steep';
-        const cls  = r.ea < 30 ? 'bad' : r.ea < 40 ? 'warn' : 'good';
-        tr.innerHTML = `
-          <td>${dd.toFixed(2)}${isOpt ? ' ★' : ''}</td>
-          <td>${r.angle.toFixed(1)}</td>
-          <td>${r.v0.toFixed(2)}</td>
-          <td>${Math.round(r.rpm).toLocaleString()}</td>
-          <td class="${cls}">${r.ea.toFixed(1)}°</td>
-          <td>${r.sc.toFixed(3)}</td>
-          <td class="${cls}">${note}</td>
-        `;
-      }
-      distBody.appendChild(tr);
-    });
-
-    // Angle sweep at current distance
-    const angles = [20,25,30,35,40,45,50,55,60,65,70,75];
-    const angleBody = document.getElementById('angle-sweep-body');
-    angleBody.innerHTML = '';
-    angles.forEach(ang => {
-      const ph = solvePhysics(d, ang, h1, h2);
-      const tr = document.createElement('tr');
-      if (Math.abs(ang - theta) < 2.6) tr.classList.add('highlight-row');
-      if (!ph) {
-        tr.innerHTML = `<td>${ang}°</td><td class="bad" colspan="6">invalid</td>`;
-      } else {
-        const rpm = toRPM(ph.v0, wdIn, eta);
-        const sc  = score(ph, rpm);
-        const valid = ph.ea >= MIN_ENTRY_DEG && rpm <= MAX_MOTOR_RPM;
-        const note = !valid ? 'filtered ✗' : ph.ea < 35 ? 'low arc' : ph.ea < 55 ? 'good ✓' : 'steep arc';
-        const cls  = !valid ? 'bad' : ph.ea < 35 ? 'warn' : 'good';
-        tr.innerHTML = `
-          <td>${ang}°</td>
-          <td>${ph.v0.toFixed(2)}</td>
-          <td>${Math.round(rpm).toLocaleString()}</td>
-          <td>${ph.t.toFixed(3)}</td>
-          <td class="${cls}">${ph.ea.toFixed(1)}°</td>
-          <td>${sc.toFixed(3)}</td>
-          <td class="${cls}">${note}</td>
-        `;
-      }
-      angleBody.appendChild(tr);
-    });
+    var eaCol=p.ea<25?'var(--red)':p.ea<35?'var(--yellow)':'var(--green)';
+    var eaMsg=p.ea<25?'TOO FLAT \u2717':p.ea<35?'marginal':'good \u2713';
+    document.getElementById('ibEntry').innerHTML=
+      '<div class="dot" style="background:'+eaCol+'"></div><span>Entry</span>'+
+      '<span class="ibv" style="color:'+eaCol+';margin-left:.3rem">'+eaMsg+'</span>';
+    drawTraj(v,p);
   }
 
-  // ── Trajectory canvas ──────────────────────────────────────────────────────
-  function drawTrajectory(d, thetaDeg, h1, h2, v0, tFlight) {
-    const canvas = document.getElementById('traj');
-    const W = canvas.offsetWidth, H = 220;
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, W, H);
-    const pad = { left: 40, right: 30, top: 20, bottom: 30 };
-    const pW = W - pad.left - pad.right, pH = H - pad.top - pad.bottom;
-    const theta = thetaDeg * Math.PI / 180;
-    const maxY = h1 + (v0 * Math.sin(theta)) ** 2 / (2 * G) + 0.3;
-    const maxX = d * 1.12;
-    const toS = (x, y) => [
-      pad.left + (x / maxX) * pW,
-      pad.top  + pH - ((y) / (maxY + 0.1)) * pH
-    ];
-    // Grid
-    ctx.strokeStyle = '#1c2030'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = i * maxY / 4;
-      const [, sy] = toS(0, y);
-      ctx.beginPath(); ctx.moveTo(pad.left, sy); ctx.lineTo(W - pad.right, sy); ctx.stroke();
-      ctx.fillStyle = '#475569'; ctx.font = '9px JetBrains Mono';
-      ctx.fillText(y.toFixed(1) + 'm', 2, sy + 3);
+  var html='';
+  for(var i=0;i<CAL.length;i++){
+    var e=realEta(CAL[i].d,CAL[i].rpm,v.h1,v.h2,v.wd);
+    html+='<div class="calcard">'+
+      '<div class="calcard-dist">'+CAL[i].d.toFixed(1)+' m  \u2605 confirmed</div>'+
+      '<div class="calcard-rpm">'+CAL[i].rpm.toLocaleString()+' RPM</div>'+
+      '<div class="calcard-eta">\u03b7_real = '+(e?e.toFixed(3):'—')+'</div>'+
+      '</div>';
+  }
+  document.getElementById('calCards').innerHTML=html;
+  buildSweep(v);
+  buildCal(v);
+}
+
+function buildSweep(v){
+  var body=document.getElementById('sweepBody');
+  body.innerHTML='';
+  for(var d=0.5;d<=7.05;d+=0.25){
+    var rpm=interpRPM(d);
+    var p=solvePhysics(d,THETA,v.h1,v.h2);
+    var tr=document.createElement('tr');
+    var isConf=false;
+    for(var i=0;i<CAL.length;i++) if(Math.abs(CAL[i].d-d)<0.01) isConf=true;
+    var isCur=Math.abs(d-v.d)<0.13;
+    if(isConf) tr.className='rconf'; else if(isCur) tr.className='rcur';
+    if(!p){
+      tr.innerHTML='<td class="cm">'+d.toFixed(2)+'</td><td class="cr" colspan="6">physics invalid</td>';
+    } else {
+      var inR=d>=CAL[0].d&&d<=CAL[CAL.length-1].d;
+      var src=isConf?'\u2605 confirmed':inR?'interpolated':'\u26a0 extrapolated';
+      var srcC=isConf?'chi':inR?'clo':'cy';
+      var eaC=p.ea<25?'cr':p.ea<35?'cy':'cg';
+      var rC=rpm>6000?'cr':'';
+      var stC=p.ea<25?'cr':p.ea<35?'cy':rpm>6000?'cr':'cg';
+      var st=p.ea<25?'too flat \u2717':p.ea<35?'marginal':rpm>6000?'RPM exceeded':'valid \u2713';
+      var dC=isConf?'chi':isCur?'clo':'cm';
+      tr.innerHTML=
+        '<td class="'+dC+'">'+d.toFixed(2)+'</td>'+
+        '<td class="'+rC+'">'+Math.round(rpm).toLocaleString()+'</td>'+
+        '<td>'+p.v0.toFixed(3)+'</td>'+
+        '<td class="'+eaC+'">'+p.ea.toFixed(1)+'\u00b0</td>'+
+        '<td>'+p.t.toFixed(3)+'</td>'+
+        '<td class="'+srcC+'">'+src+'</td>'+
+        '<td class="'+stC+'">'+st+'</td>';
     }
-    // Ground
-    const [gx1, gy1] = toS(0, 0), [gx2] = toS(maxX, 0);
-    ctx.strokeStyle = '#2a2f45'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(gx1, gy1); ctx.lineTo(gx2, gy1); ctx.stroke();
-    // Hub
-    const [hx, hy] = toS(d, h2);
-    ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(hx - 7, hy); ctx.lineTo(hx + 7, hy); ctx.stroke();
-    ctx.strokeStyle = '#00e5ff33'; ctx.lineWidth = 1;
-    const [, hby] = toS(d, 0);
-    ctx.beginPath(); ctx.moveTo(hx - 7, hy); ctx.lineTo(hx - 7, hby);
-    ctx.moveTo(hx + 7, hy); ctx.lineTo(hx + 7, hby); ctx.stroke();
-    // Trajectory
-    ctx.beginPath();
-    for (let i = 0; i <= 200; i++) {
-      const frac = i / 200;
-      const tx = d * frac, tt = tFlight * frac;
-      const ty = h1 + v0 * Math.sin(theta) * tt - 0.5 * G * tt * tt;
-      const [sx, sy] = toS(tx, ty);
-      i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-    }
-    const grad = ctx.createLinearGradient(pad.left, 0, W - pad.right, 0);
-    grad.addColorStop(0, '#7c3aed'); grad.addColorStop(1, '#00e5ff');
-    ctx.strokeStyle = grad; ctx.lineWidth = 2.5; ctx.stroke();
-    // Dots
-    const [sx0, sy0] = toS(0, h1);
-    ctx.beginPath(); ctx.arc(sx0, sy0, 5, 0, Math.PI*2);
-    ctx.fillStyle = '#7c3aed'; ctx.fill();
-    ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI*2);
-    ctx.fillStyle = '#00e5ff'; ctx.fill();
-    ctx.fillStyle = '#64748b'; ctx.font = '9px JetBrains Mono';
-    ctx.fillText('shooter', sx0 + 6, sy0 - 6);
-    ctx.fillStyle = '#00e5ff';
-    ctx.fillText('hub', hx + 10, hy - 4);
+    body.appendChild(tr);
+  }
+}
+
+function buildCal(v){
+  var etaSum=0,etaN=0;
+  for(var i=0;i<CAL.length;i++){
+    var e=realEta(CAL[i].d,CAL[i].rpm,v.h1,v.h2,v.wd);
+    if(e){etaSum+=e;etaN++;}
+  }
+  var avg=etaN>0?etaSum/etaN:0.424;
+
+  var dh='';
+  for(var i=0;i<CAL.length;i++){
+    var c=CAL[i];
+    var p=solvePhysics(c.d,THETA,v.h1,v.h2);
+    var mr=p?Math.round(mdlRPM(p.v0,v.wd,0.85)):null;
+    var e=realEta(c.d,c.rpm,v.h1,v.h2,v.wd);
+    var ratio=mr?(c.rpm/mr).toFixed(3):'—';
+    dh+='<div class="diag-card">'+
+      '<div class="diag-dist">'+c.d.toFixed(1)+' m shot</div>'+
+      '<div class="diag-model">Model (\u03b7=0.85): '+(mr?mr.toLocaleString():'—')+' RPM</div>'+
+      '<div class="diag-real">Reality: '+c.rpm.toLocaleString()+' RPM</div>'+
+      '<div class="diag-eta">\u03b7_real = '+(e?e.toFixed(4):'—')+'</div>'+
+      '<div class="diag-ratio">Ratio: '+ratio+'\u00d7</div>'+
+      '</div>';
+  }
+  document.getElementById('diagGrid').innerHTML=dh;
+
+  var lines='';
+  for(var i=0;i<CAL.length;i++){
+    var e=realEta(CAL[i].d,CAL[i].rpm,v.h1,v.h2,v.wd);
+    lines+='&nbsp;&nbsp;'+CAL[i].d.toFixed(1)+' m \u2192 '+CAL[i].rpm+' RPM \u2192 \u03b7 = '+(e?e.toFixed(4):'—')+'<br>';
+  }
+  document.getElementById('diagExp').innerHTML=
+    '<span style="color:var(--yellow)">WHY THE MODEL WAS WRONG</span><br><br>'+
+    'Original EFFICIENCY=0.85 predicts ~900\u20131100 RPM. Reality: 1850\u20133600 RPM.<br>'+
+    'Back-calculated \u03b7 per point:<br>'+lines+
+    '<br>&nbsp;&nbsp;Average \u03b7_real = '+avg.toFixed(4)+
+    ' &nbsp;(was 0.85 \u2014 off by '+(0.85/avg).toFixed(2)+'\u00d7)<br><br>'+
+    '<span style="color:var(--red)">Causes:</span> foam compression, ball slip, 2-wheel grip, mechanical losses<br>'+
+    '<span style="color:var(--green)">Fix:</span> Use interpolateRPM(dist) \u2014 never derive RPM from physics model.';
+
+  var tb=document.getElementById('calBody');
+  tb.innerHTML='';
+  for(var d=1.5;d<=5.55;d+=0.25){
+    var rpm=interpRPM(d);
+    var p=solvePhysics(d,THETA,v.h1,v.h2);
+    var mr=p?mdlRPM(p.v0,v.wd,0.85):null;
+    var delta=mr?Math.round(rpm-mr):null;
+    var etaR=null;
+    if(p){var s=(rpm/60)*Math.PI*(v.wd*0.0254);etaR=p.v0/s;}
+    var isConf=false;
+    for(var i=0;i<CAL.length;i++) if(Math.abs(CAL[i].d-d)<0.01) isConf=true;
+    var tr=document.createElement('tr');
+    if(isConf) tr.className='rconf';
+    tr.innerHTML=
+      '<td class="'+(isConf?'chi':'cm')+'">'+d.toFixed(2)+(isConf?' \u2605':'')+'</td>'+
+      '<td class="'+(isConf?'chi':'clo')+'">'+Math.round(rpm).toLocaleString()+'</td>'+
+      '<td class="cr">'+(delta!==null?(delta>0?'+':'')+delta.toLocaleString():'—')+'</td>'+
+      '<td class="cg">'+(etaR?etaR.toFixed(3):'—')+'</td>'+
+      '<td class="'+(isConf?'chi':'clo')+'">'+(isConf?'\u2605 confirmed':'interpolated')+'</td>';
+    tb.appendChild(tr);
+  }
+}
+
+function drawTraj(v,phys){
+  var canvas=document.getElementById('traj');
+  var wrap=document.getElementById('caWrap');
+  var W=wrap.clientWidth||600;
+  var H=320;
+  canvas.width=W; canvas.height=H;
+  var ctx=canvas.getContext('2d');
+  var PL=46,PR=36,PT=24,PB=36;
+  var pW=W-PL-PR, pH=H-PT-PB;
+  var th=THETA*Math.PI/180;
+  var maxY=v.h1+Math.pow(phys.v0*Math.sin(th),2)/(2*G)+0.6;
+  var maxX=v.d*1.18;
+  function px(x){return PL+(x/maxX)*pW;}
+  function py(y){return PT+pH-(y/(maxY+0.1))*pH;}
+
+  var bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#080c12');bg.addColorStop(1,'#040608');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  ctx.font='9px monospace';
+  for(var i=0;i<=5;i++){
+    var gv=i*maxY/5, gyy=py(gv);
+    ctx.strokeStyle='#0f1a26';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(PL,gyy);ctx.lineTo(W-PR,gyy);ctx.stroke();
+    ctx.fillStyle='#2a3f54';ctx.fillText(gv.toFixed(1),2,gyy+3);
+  }
+  for(var xi=0;xi<=Math.ceil(maxX);xi++){
+    var gx=px(xi);
+    ctx.strokeStyle='#0f1a26';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(gx,PT);ctx.lineTo(gx,PT+pH);ctx.stroke();
+    ctx.fillStyle='#2a3f54';ctx.fillText(xi+'m',gx-7,H-5);
+  }
+  ctx.strokeStyle='#1f2d3d';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(px(0),py(0));ctx.lineTo(px(maxX),py(0));ctx.stroke();
+
+  ctx.setLineDash([3,4]);ctx.strokeStyle='rgba(0,212,255,.12)';ctx.lineWidth=1;
+  for(var i=0;i<CAL.length;i++){
+    ctx.beginPath();ctx.moveTo(px(CAL[i].d),py(v.h2));ctx.lineTo(px(CAL[i].d),py(0));ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  var hx=px(v.d),hy=py(v.h2);
+  ctx.strokeStyle='rgba(0,212,255,.15)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(hx,hy);ctx.lineTo(hx,py(0));ctx.stroke();
+  ctx.strokeStyle='#00d4ff';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(hx-10,hy);ctx.lineTo(hx+10,hy);ctx.stroke();
+  if(phys.ea>0){
+    ctx.strokeStyle='rgba(255,107,53,.5)';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(hx,hy,18,-Math.PI/2-(phys.ea*Math.PI/180),-Math.PI/2,false);ctx.stroke();
   }
 
-  [elH1, elH2, elWd, elEta, elTheta, elD].forEach(el => el.addEventListener('input', update));
-  window.addEventListener('resize', update);
-  update();
-</script>
-</body>
+  ctx.beginPath();
+  for(var i=0;i<=400;i++){
+    var f=i/400,tx=v.d*f,tt=phys.t*f;
+    var ty=v.h1+phys.v0*Math.sin(th)*tt-0.5*G*tt*tt;
+    if(i===0) ctx.moveTo(px(tx),py(ty)); else ctx.lineTo(px(tx),py(ty));
+  }
+  ctx.strokeStyle='rgba(0,212,255,.07)';ctx.lineWidth=9;ctx.stroke();
+
+  ctx.beginPath();
+  for(var i=0;i<=400;i++){
+    var f=i/400,tx=v.d*f,tt=phys.t*f;
+    var ty=v.h1+phys.v0*Math.sin(th)*tt-0.5*G*tt*tt;
+    if(i===0) ctx.moveTo(px(tx),py(ty)); else ctx.lineTo(px(tx),py(ty));
+  }
+  var tg=ctx.createLinearGradient(PL,0,W-PR,0);
+  tg.addColorStop(0,'#00d4ff');tg.addColorStop(1,'#ff6b35');
+  ctx.strokeStyle=tg;ctx.lineWidth=2.5;ctx.stroke();
+
+  ctx.beginPath();ctx.arc(px(0),py(v.h1),6,0,6.283);ctx.fillStyle='#00d4ff';ctx.fill();
+  ctx.beginPath();ctx.arc(hx,hy,6,0,6.283);ctx.fillStyle='#ff6b35';ctx.fill();
+  for(var i=0;i<CAL.length;i++){
+    ctx.beginPath();ctx.arc(px(CAL[i].d),py(v.h2),4,0,6.283);
+    ctx.fillStyle='rgba(0,212,255,.6)';ctx.fill();
+    ctx.fillStyle='rgba(0,212,255,.7)';ctx.font='9px monospace';
+    ctx.fillText('\u2605',px(CAL[i].d)-4,hy-14);
+  }
+  ctx.fillStyle='#4a6070';ctx.font='10px monospace';
+  ctx.fillText('exit',px(0)+8,py(v.h1)-6);
+  ctx.fillStyle='#ff6b35';ctx.fillText('hub',hx+12,hy-4);
+}
+
+function switchTab(name){
+  var tabEls=document.querySelectorAll('.tab');
+  var names=['live','sweep','cal'];
+    for(var i=0;i<tabEls.length;i++) tabEls[i].classList.toggle('active',names[i]===name);
+      var ids=['tabLive','tabSweep','tabCal'];
+      var targets=['live','sweep','cal'];
+      for(var i=0;i<ids.length;i++) document.getElementById(ids[i]).classList.toggle('active',targets[i]===name);
+          if(name==='live') setTimeout(update,60);
+    }
+
+    document.getElementById('slD').addEventListener('input',update);
+    document.getElementById('slH1').addEventListener('input',update);
+    document.getElementById('slH2').addEventListener('input',update);
+    document.getElementById('slWd').addEventListener('input',update);
+    document.getElementById('slEta').addEventListener('input',update);
+    window.addEventListener('resize',update);
+    window.addEventListener('load',function(){setTimeout(update,100);});
+    setTimeout(update,100);
+  </script>
+  </body>
 </html>

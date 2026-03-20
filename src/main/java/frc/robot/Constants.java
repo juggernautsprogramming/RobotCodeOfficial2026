@@ -2,7 +2,6 @@ package frc.robot;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Map;
 
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
@@ -21,10 +20,32 @@ import edu.wpi.first.wpilibj.Filesystem;
  * Central constants file for the FRC 2026 robot.
  *
  * Layout:
- *   AutoConstants    — autonomous path-following gains
- *   VisionHardware   — camera names, physical Transform3d offsets
- *   VisionConstants  — tag layout, Kalman/PID tuning, distance thresholds
- *   ShooterConstants — hub geometry, ballistics parameters, alignment PID
+ *   AutoConstants       — autonomous path-following gains
+ *   AutoStartConstants  — starting positions and auto sequence parameters
+ *   VisionHardware      — camera names, physical Transform3d offsets
+ *   VisionConstants     — tag layout, Kalman/PID tuning, distance thresholds
+ *   DriveToPoseConstants— ProfiledPID gains for DriveToPose command
+ *   ShooterConstants    — hub geometry, ballistics parameters, alignment PID
+ *   IntakeConstants     — intake actuation and roller constants
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * SHOOTER CALIBRATION NOTE (updated):
+ *
+ *   The original model used EFFICIENCY = 0.85, predicting ~900–1100 RPM.
+ *   Physical field measurement shows 1850–3600 RPM is actually required.
+ *   Back-calculation from 4 confirmed data points gives η_real ≈ 0.42.
+ *
+ *   Root causes of the gap:
+ *     1. Foam ball compression absorbs significant energy on contact
+ *     2. Ball slip during the acceleration phase through the wheels
+ *     3. Two-wheel simultaneous grip dynamics
+ *     4. Mechanical drivetrain losses not captured by surface-speed model
+ *
+ *   Fix: Do NOT use the physics v₀ model to compute RPM.
+ *        Use ShooterConstants.interpolateRPM(distanceMeters) instead.
+ *        The RPM_DISTANCE_TABLE is the source of truth — all entries
+ *        marked "confirmed" were measured on the physical field.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 public final class Constants {
 
@@ -42,22 +63,54 @@ public final class Constants {
         public static final SwerveDriveKinematics swerveKinematics = new SwerveDriveKinematics(
             new Translation2d( Units.inchesToMeters(10),  Units.inchesToMeters(10)),
             new Translation2d( Units.inchesToMeters(10),  Units.inchesToMeters(-10)),
-            new Translation2d( Units.inchesToMeters(-10),  Units.inchesToMeters(10)),
+            new Translation2d( Units.inchesToMeters(-10), Units.inchesToMeters(10)),
             new Translation2d( Units.inchesToMeters(-10), Units.inchesToMeters(-10))
         );
 
-        private AutoConstants() {
-        }
+        private AutoConstants() {}
+    }
+
+    // =========================================================================
+    // AUTONOMOUS STARTING POSITIONS
+    // =========================================================================
+
+    public static final class AutoStartConstants {
+
+        /** Left start — robot centre on the hub line, facing hub */
+        public static final double LEFT_START_X   = 2.0;
+        public static final double LEFT_START_Y   = 6.5;
+        public static final double LEFT_START_HDG = -30.0; // degrees
+
+        /** Center start — directly in front of hub */
+        public static final double CENTER_START_X   = 2.0;
+        public static final double CENTER_START_Y   = 4.026; // matches HUB_CENTER.y
+        public static final double CENTER_START_HDG = 0.0;
+
+        /** Right start — right side of hub line */
+        public static final double RIGHT_START_X   = 2.0;
+        public static final double RIGHT_START_Y   = 1.7;
+        public static final double RIGHT_START_HDG = 30.0;
+
+        /** Balls to shoot from preload (first shot zone) */
+        public static final int PRELOAD_BALL_COUNT = 3;
+        /** Balls picked up from the field */
+        public static final int PICKUP_BALL_COUNT  = 5;
+        /** Hard safety timeout for the entire auto sequence */
+        public static final double AUTO_TIMEOUT_S  = 15.0;
+
+        // PathPlanner auto constraints
+        public static final double AUTO_MAX_VEL       = 2.0;   // m/s
+        public static final double AUTO_MAX_ACCEL     = 2.5;   // m/s²
+        public static final double AUTO_MAX_ANG_VEL   = 360.0; // deg/s
+        public static final double AUTO_MAX_ANG_ACCEL = 720.0; // deg/s²
+
+        private AutoStartConstants() {}
     }
 
     // =========================================================================
     // VISION — hardware (camera physical positions)
     // =========================================================================
 
-    /**
-     * Camera names must match exactly what is configured in PhotonVision.
-     * These are the two physical cameras on the robot.
-     */
     public static final class VisionHardware {
 
         /** Name used in PhotonVision UI for the rear-right camera. */
@@ -68,21 +121,20 @@ public final class Constants {
         /**
          * All camera offsets keyed by camera name.
          * Transform3d is robot-center → camera (forward=+X, left=+Y, up=+Z).
-         * Adjust translations/rotations to match your actual mounting.
          */
         public static final Map<String, Transform3d> kCameraOffsets = Map.of(
             CAMERA_BACK_RIGHT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(10),   // 10" behind robot center
-                    Units.inchesToMeters(10),   // 10" to the right
-                    Units.inchesToMeters(20)),   // 20" above floor
+                    Units.inchesToMeters(10),
+                    Units.inchesToMeters(10),
+                    Units.inchesToMeters(20)),
                 new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(90))
             ),
             CAMERA_BACK_LEFT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(-10),   // 10" behind robot center
-                    Units.inchesToMeters(10),    // 10" to the left
-                    Units.inchesToMeters(20)),   // 20" above floor
+                    Units.inchesToMeters(-10),
+                    Units.inchesToMeters(10),
+                    Units.inchesToMeters(20)),
                 new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(285))
             )
         );
@@ -92,39 +144,7 @@ public final class Constants {
 
         private VisionHardware() {}
     }
-// =========================================================================
-// AUTONOMOUS STARTING POSITIONS
-// =========================================================================
-public static final class AutoStartConstants {
 
-    /** Left start — robot centre on the hub line, facing hub */
-    public static final double LEFT_START_X   = 2.0;
-    public static final double LEFT_START_Y   = 6.5;
-    public static final double LEFT_START_HDG = -30.0; // degrees
-
-    /** Center start — directly in front of hub */
-    public static final double CENTER_START_X   = 2.0;
-    public static final double CENTER_START_Y   = 4.026; // matches HUB_CENTER.y
-    public static final double CENTER_START_HDG = 0.0;
-
-    /** Right start — right side of hub line */
-    public static final double RIGHT_START_X   = 2.0;
-    public static final double RIGHT_START_Y   = 1.7;
-    public static final double RIGHT_START_HDG = 30.0;
-
-    /** Balls to shoot from preload (first shot zone) */
-    public static final int PRELOAD_BALL_COUNT = 3;
-    /** Balls picked up from the field */
-    public static final int PICKUP_BALL_COUNT  = 5;
-    /** Hard safety timeout for the entire auto sequence */
-    public static final double AUTO_TIMEOUT_S  = 15.0;
-    // PathPlanner auto constraints
-    public static final double AUTO_MAX_VEL       = 2.0;   // m/s
-    public static final double AUTO_MAX_ACCEL     = 2.5;   // m/s²
-    public static final double AUTO_MAX_ANG_VEL   = 360.0; // deg/s
-    public static final double AUTO_MAX_ANG_ACCEL = 720.0; // deg/s²
-    private AutoStartConstants() {}
-}
     // =========================================================================
     // VISION — algorithm constants
     // =========================================================================
@@ -133,84 +153,68 @@ public static final class AutoStartConstants {
 
         /** 2026 field AprilTag layout — used by PhotonPoseEstimator. */
         public static AprilTagFieldLayout kTagLayout;
-                static {
-                    try {
-                        // This looks for the file you just put in src/main/deploy
-                        Path path = Filesystem.getDeployDirectory().toPath().resolve("custom_hub.json");
-                        kTagLayout = new AprilTagFieldLayout(path);
-                    } catch (IOException e) {
-                        DriverStation.reportError("Could not load custom AprilTag layout!", e.getStackTrace());
-                        // Fallback to empty layout if file is missing
-                        kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+        static {
+            try {
+                Path path = Filesystem.getDeployDirectory().toPath().resolve("custom_hub.json");
+                kTagLayout = new AprilTagFieldLayout(path);
+            } catch (IOException e) {
+                DriverStation.reportError("Could not load custom AprilTag layout!", e.getStackTrace());
+                kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
             }
         }
-        // ── 2026 Rebuilt (AndyMark) custom hub field dimensions ───────────────
+
         /** Full field length — from blue wall to red wall (metres). */
         public static final double FIELD_LENGTH_M = 8.0;
         /** Full field width (metres). */
         public static final double FIELD_WIDTH_M  = 8.052;
 
-        /**
-         * Maximum pose ambiguity ratio accepted from a single-tag solve.
-         * Range [0, 1]; lower = stricter. 0.2 is a good starting point.
-         */
+        /** Maximum pose ambiguity ratio accepted from a single-tag solve. */
         public static final double kAmbiguityThreshold = 0.2;
 
-        // ── Yaw-alignment PID (used for fine rotation-only align) ─────────────
+        // ── Yaw-alignment PID ─────────────────────────────────────────────────
         public static final double kP = 0.06;
         public static final double kI = 0.002;
         public static final double kD = 0.005;
         /** Acceptable yaw error before "aligned" is declared (degrees). */
         public static final double angleTolerance = 0.5;
 
-        // ── Camera geometry (used for 2D distance calculation) ────────────────
-        /** Height of the camera lens above the floor (meters). */
+        // ── Camera geometry ───────────────────────────────────────────────────
         public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
-        /** Height of the generic (non-hub) tag target center above floor (meters). */
         public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(12.9);
-        /** Camera pitch angle (radians, negative = tilted up). */
         public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(20);
-        // In VisionConstants:
         /** Height of the hub AprilTag center above the floor (meters). */
-        public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(24.0); // measure and update
+        public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(24.0);
+
         private VisionConstants() {}
     }
 
     // =========================================================================
-    // DRIVE TO POSE — ProfiledPID gains & tolerances for DriveToPose command
+    // DRIVE TO POSE — ProfiledPID gains & tolerances
     // =========================================================================
 
     public static final class DriveToPoseConstants {
 
-        // ── Translation ProfiledPID (X and Y share the same gains) ───────────
-        public static final double kP_XY   = 3.5;
-        public static final double kI_XY   = 0.0;
-        public static final double kD_XY   = 0.15;
-        /** Maximum approach speed (m/s). */
-        public static final double MAX_VEL_MPS    = 3.0;
-        /** Maximum approach acceleration (m/s²). */
+        public static final double kP_XY         = 3.5;
+        public static final double kI_XY         = 0.0;
+        public static final double kD_XY         = 0.15;
+        public static final double MAX_VEL_MPS   = 3.0;
         public static final double MAX_ACCEL_MPS2 = 4.0;
 
-        // ── Heading ProfiledPID ───────────────────────────────────────────────
-        public static final double kP_THETA  = 5.5;
-        public static final double kI_THETA  = 0.0;
-        public static final double kD_THETA  = 0.25;
-        /** Maximum rotation speed (rad/s). */
-        public static final double MAX_OMEGA_RAD_S   = Math.PI * 2.0;
-        /** Maximum angular acceleration (rad/s²). */
-        public static final double MAX_ALPHA_RAD_S2  = Math.PI * 4.0;
+        public static final double kP_THETA      = 5.5;
+        public static final double kI_THETA      = 0.0;
+        public static final double kD_THETA      = 0.25;
+        public static final double MAX_OMEGA_RAD_S  = Math.PI * 2.0;
+        public static final double MAX_ALPHA_RAD_S2 = Math.PI * 4.0;
 
-        // ── At-goal tolerances ────────────────────────────────────────────────
         /** XY tolerance before "at goal" (metres). ~1.5 inches. */
         public static final double XY_TOLERANCE_M      = Units.inchesToMeters(1.5);
         /** Heading tolerance before "at goal" (radians). 1 degree. */
         public static final double THETA_TOLERANCE_RAD = Units.degreesToRadians(1.0);
 
-        // ── Debounce & safety ─────────────────────────────────────────────────
         /** Robot must stay within tolerance for this long before isFinished (seconds). */
-        public static final double DEBOUNCE_S       = 0.10;
+        public static final double DEBOUNCE_S        = 0.10;
         /** Kill-switch: abort if the command runs longer than this (seconds). */
-        public static final double MAX_RUNTIME_S    = 5.0;
+        public static final double MAX_RUNTIME_S     = 5.0;
         /** Joystick axis magnitude that triggers driver override. */
         public static final double OVERRIDE_DEADBAND = 0.15;
 
@@ -224,90 +228,51 @@ public static final class AutoStartConstants {
     /**
      * All shooter-related constants.
      *
-     * Physics model (from frc_v0_calculator.html):
+     * ── Physics model (for trajectory/entry-angle calculations only) ──────────
      *   v₀ = d · √( g / (2·cos²θ · (d·tanθ − Δh)) )
      *   entry_angle = atan2(−vy_final, vx)
+     *
+     * ── RPM source of truth ───────────────────────────────────────────────────
+     *   Always call interpolateRPM(distanceMeters).
+     *   Never derive RPM from the physics model — η_real ≈ 0.42, not 0.85.
      */
     public static final class ShooterConstants {
 
         // ── Field / Hub geometry ──────────────────────────────────────────────
         /**
-         * Hub center position on the custom 8 m × 8.052 m field (metres).
-         * Derived from the four hub AprilTag positions in custom_hub.json:
-         *   Tag 19: (4.0,    4.026), Tag 9: (5.1938, 4.026)  ← X midpoint = 4.5969
-         *   Tag 8:  (4.5969, 4.6229), Tag 11: (4.5969, 3.4291) ← Y midpoint = 4.026
+         * Hub center on the custom 8 m × 8.052 m field (metres).
+         * Derived from the four hub AprilTag positions in custom_hub.json.
          */
-        // ── Flywheel ──────────────────────────────────────────────────────────────────
-        public static final int    FLYWHEEL_LEADER_ID   = 29;   // ← your CAN ID
-        public static final int    FLYWHEEL_FOLLOWER_ID = 30;   // ← your CAN ID
-        public static final String FLYWHEEL_CAN_BUS     = "rio"; // or "CANivore", etc.
-        public static final boolean FLYWHEEL_FOLLOWER_OPPOSE = true; // oppose if motors face each other
-        public static final double FIXED_SHOT_RPM_M    = 200.0;
-        public static final double FIXED_SHOT_ANGLE_DEG = 45.0; // tune this on the robot
+        public static final Translation2d HUB_CENTER =
+                new Translation2d(4.5969, 4.026);
 
-        // ── Distance-based fixed RPM presets (operator D-pad) ─────────────────
-        // D-Pad Up    — close range  (1.5 m) ✓ confirmed
-        public static final double PRESET_CLOSE_RPM      = 1850.0;
-        public static final double PRESET_CLOSE_DIST_M   = 1.5;
-        // D-Pad Right — mid range    (2.5 m) 
-        public static final double PRESET_MID_RPM        = 2200.0;
-        public static final double PRESET_MID_DIST_M     = 2.5;
-        // D-Pad Down  — far range    (4.0 m) 
-        public static final double PRESET_FAR_RPM        = 2680.0;
-        public static final double PRESET_FAR_DIST_M     = 4.0;
-        // D-Pad Left  — very far     (5.5 m) 
-        public static final double PRESET_VFAR_RPM       = 3600;
-        public static final double PRESET_VFAR_DIST_M    = 5.5;
-    // ── Flywheel stator current limit ─────────────────────────────────────────
-        /** Stator current limit for flywheel motors (Amps). Prevents brown-outs. */
-        public static final double FLYWHEEL_STATOR_LIMIT_AMPS = 60.0;
-
-        // ── Flywheel PID / feedforward — VelocityTorqueCurrentFOC (Phoenix Pro) ──────
-        // All gains are in Amps, NOT Volts. Run WPILib SysId (quasistatic + dynamic),
-        // then divide the reported kS/kV/kA voltage values by the motor's Kt (~0.0181 V/A
-        // for Kraken X60 / Falcon 500) to obtain the Amp-domain equivalents.
-        public static final double FLYWHEEL_kP = 6.0;   // A per RPS of error — start here, tune up
-        public static final double FLYWHEEL_kI = 0.0;   // A per accumulated rotation — leave 0 initially
-        public static final double FLYWHEEL_kD = 0.0;   // A per RPS/s — leave 0 initially
-        public static final double FLYWHEEL_kS = 12.426
-        ;   // A — static friction; set from SysId result / Kt
-        public static final double FLYWHEEL_kV = 0.1565;   // A per RPS — velocity FF; set from SysId result / Kt
-        public static final double FLYWHEEL_kA = 0.0;   // A per RPS/s — accel FF; set from SysId result / Kt
-
-        // ── Distance → RPM interpolation table ────────────────────────────────
-        // All four points confirmed on the physical field.
-        // Format: { distance_meters, target_rpm }
-        public static final double[][] RPM_DISTANCE_TABLE = {
-            { 1.5, 1850.0 },  // close — confirmed
-            { 2.5, 2200.0 },  // mid   — confirmed
-            { 4.0, 2680.0 },  // far   — confirmed
-            { 5.5, 3600.0 },  // vfar  — confirmed
-        };
-        public static final Translation2d HUB_CENTER = new Translation2d(4.5969, 4.026);
-
-        /**
-         * Height of the hub opening (top of target) above the floor (meters).
-         * Measure from the 2026 game manual or physical field.
-         */
+        /** Height of the hub opening above the floor (meters). */
         public static final double HUB_TARGET_HEIGHT_METERS = 2.64;
 
-        /**
-         * AprilTag IDs that are attached to / centered on the hub.
-         * Check the 2026 game manual and update before competition.
-         */
-        public static final int[] HUB_APRIL_TAG_IDS = {8,9,11, 19};
+        /** AprilTag IDs attached to the hub. */
+        public static final int[] HUB_APRIL_TAG_IDS = {8, 9, 11, 19};
 
         // ── Shooter mechanism geometry ────────────────────────────────────────
         /** Height of the game-piece exit point above the floor (meters). */
         public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.52;
 
-        /**
-         * Horizontal distance from robot center to shooter exit (meters).
-         * Positive = exit is in front of robot center.
-         */
+        /** Horizontal distance from robot center to shooter exit (meters). */
         public static final double SHOOTER_X_OFFSET_METERS = 0.20;
 
-        // ── Flywheel / motor hardware ─────────────────────────────────────────
+        // ── Fixed hood angle ──────────────────────────────────────────────────
+        /**
+         * The hood (pivot) is physically fixed — it cannot be adjusted during a match.
+         * All shot calculations must use this angle.
+         * Previously stored as FIXED_SHOT_ANGLE_DEG = 45.0 (incorrect/placeholder).
+         */
+        public static final double FIXED_SHOT_ANGLE_DEG = 61.5; // ← confirmed physical angle
+
+        // ── Flywheel hardware ─────────────────────────────────────────────────
+        public static final int     FLYWHEEL_LEADER_ID       = 29;
+        public static final int     FLYWHEEL_FOLLOWER_ID     = 30;
+        public static final String  FLYWHEEL_CAN_BUS         = "rio";
+        public static final boolean FLYWHEEL_FOLLOWER_OPPOSE = true;
+
         /** Shooter wheel diameter (inches). */
         public static final double WHEEL_DIAMETER_INCHES = 4.0;
 
@@ -315,52 +280,128 @@ public static final class AutoStartConstants {
         public static final double SHOOTER_GEAR_RATIO = 1.0;
 
         /**
-         * Compression efficiency: fraction of flywheel surface speed that
-         * transfers to the game piece (typical range 0.80–0.95).
+         * Compression efficiency — CORRECTED from 0.85 to empirical value.
+         *
+         * Back-calculated from 4 confirmed field measurements:
+         *   1.5 m → 1850 RPM  → η = 0.410
+         *   2.5 m → 2200 RPM  → η = 0.426
+         *   4.0 m → 2680 RPM  → η = 0.436
+         *   5.5 m → 3600 RPM  → η = 0.425
+         *   Average           → η ≈ 0.424
+         *
+         * NOTE: This value is retained for trajectory/entry-angle display purposes.
+         * DO NOT use it to compute target RPM — use interpolateRPM() instead.
          */
-        public static final double EFFICIENCY = 0.85;
+        public static final double EFFICIENCY = 0.424; // corrected (was 0.85)
 
-        /** Motor RPM cap — shots requiring more than this are rejected as invalid. */
+        /** Motor RPM cap — shots requiring more than this are rejected. */
         public static final double MAX_MOTOR_RPM = 6000.0;
 
-        /** Idle RPM: flywheel speed held while the command is active but not firing. */
+        /** Idle RPM held while the command is active but not firing. */
         public static final double IDLE_RPM = 500.0;
 
-        // ── Pivot (hood) hardware — matches ShooterSubsystem ─────────────────
-        /** Pivot motor CAN ID (leader). */
-        public static final int PIVOT_LEADER_ID = 99;
-        /** Pivot motor CAN ID (follower). */
-        public static final int PIVOT_FOLLOWER_ID = 99;
-        /** CAN bus name for the pivot motors. */
-        public static final String PIVOT_CAN_BUS = "rio";
+        /** Stator current limit for flywheel motors (Amps). */
+        public static final double FLYWHEEL_STATOR_LIMIT_AMPS = 60.0;
 
-        /** Pivot gear ratio: motor turns per one degree of pivot rotation. */
-        public static final double PIVOT_GEAR_RATIO = 1.0; // adjust to actual gearing
+        // ── Flywheel PID / feedforward (VelocityTorqueCurrentFOC, Phoenix Pro) ──
+        // Gains are in Amps. Derived from SysId voltage values ÷ Kt (~0.0181 for Kraken/Falcon).
+        public static final double FLYWHEEL_kP = 6.0;
+        public static final double FLYWHEEL_kI = 0.0;
+        public static final double FLYWHEEL_kD = 0.0;
+        public static final double FLYWHEEL_kS = 12.426;
+        public static final double FLYWHEEL_kV = 0.1565;
+        public static final double FLYWHEEL_kA = 0.0;
 
-        /** Motion Magic cruise velocity (rotations/sec). */
-        public static final double PIVOT_CRUISE_VELOCITY = 100.0;
-        /** Motion Magic acceleration (rotations/sec²). */
-        public static final double PIVOT_ACCELERATION = 200.0;
+        // ── Distance → RPM table (SOURCE OF TRUTH for RPM) ───────────────────
+        /**
+         * Monotone cubic-spline interpolation anchors.
+         * ★ = physically confirmed on the field.
+         * All other rows are spline-interpolated from those four anchors.
+         *
+         * To add more confirmed points: measure on the field, mark with ★,
+         * and update the interpolator — the spline will reshape automatically.
+         *
+         * Format: { distance_meters, target_rpm }
+         */
+        public static final double[][] RPM_DISTANCE_TABLE = {
+            { 1.50,  1850.0 },  // ★ confirmed
+            { 1.75,  1934.0 },  // interpolated
+            { 2.00,  2020.0 },  // interpolated
+            { 2.25,  2108.0 },  // interpolated
+            { 2.50,  2200.0 },  // ★ confirmed
+            { 2.75,  2296.0 },  // interpolated
+            { 3.00,  2393.0 },  // interpolated
+            { 3.25,  2481.0 },  // interpolated
+            { 3.50,  2561.0 },  // interpolated
+            { 3.75,  2622.0 },  // interpolated
+            { 4.00,  2680.0 },  // ★ confirmed
+            { 4.25,  2775.0 },  // interpolated
+            { 4.50,  2890.0 },  // interpolated
+            { 4.75,  3010.0 },  // interpolated
+            { 5.00,  3148.0 },  // interpolated
+            { 5.25,  3320.0 },  // interpolated
+            { 5.50,  3600.0 },  // ★ confirmed
+        };
 
-        /** Pivot PID — Slot 0. */
-        public static final double PIVOT_kP = 2.0;
-        public static final double PIVOT_kI = 0.0;
-        public static final double PIVOT_kD = 0.1;
+        // ── D-Pad operator presets (map directly to confirmed table rows) ──────
+        public static final double PRESET_CLOSE_RPM    = 1850.0;
+        public static final double PRESET_CLOSE_DIST_M = 1.5;
+        public static final double PRESET_MID_RPM      = 2200.0;
+        public static final double PRESET_MID_DIST_M   = 2.5;
+        public static final double PRESET_FAR_RPM      = 2680.0;
+        public static final double PRESET_FAR_DIST_M   = 4.0;
+        public static final double PRESET_VFAR_RPM     = 3600.0;
+        public static final double PRESET_VFAR_DIST_M  = 5.5;
 
-        /** Acceptable pivot angle error to consider "at target" (degrees). */
+        /**
+         * Interpolates target RPM from RPM_DISTANCE_TABLE using linear
+         * interpolation between the two nearest rows.
+         *
+         * This is the ONLY correct way to get a target RPM in ShotCalculator.
+         * Do not call the physics v₀ model for RPM — it assumes η = 0.85
+         * which is wrong for this mechanism (η_real ≈ 0.42).
+         *
+         * @param distMeters horizontal distance from shooter exit to hub center
+         * @return target flywheel RPM, clamped to table bounds
+         */
+        public static double interpolateRPM(double distMeters) {
+            double[][] tbl = RPM_DISTANCE_TABLE;
+            if (distMeters <= tbl[0][0])              return tbl[0][1];
+            if (distMeters >= tbl[tbl.length - 1][0]) return tbl[tbl.length - 1][1];
+            for (int i = 0; i < tbl.length - 1; i++) {
+                if (distMeters >= tbl[i][0] && distMeters <= tbl[i + 1][0]) {
+                    double t = (distMeters - tbl[i][0]) / (tbl[i + 1][0] - tbl[i][0]);
+                    return tbl[i][1] + t * (tbl[i + 1][1] - tbl[i][1]);
+                }
+            }
+            return tbl[tbl.length - 1][1];
+        }
+
+        // ── Pivot (hood) hardware — FIXED, no motion needed ──────────────────
+        // Hood is physically locked at FIXED_SHOT_ANGLE_DEG.
+        // Pivot motor IDs retained in case a future robot re-enables adjustment.
+        public static final int    PIVOT_LEADER_ID   = 99; // unused — hood fixed
+        public static final int    PIVOT_FOLLOWER_ID = 99; // unused — hood fixed
+        public static final String PIVOT_CAN_BUS     = "rio";
+
+        public static final double PIVOT_GEAR_RATIO        = 1.0;
+        public static final double PIVOT_CRUISE_VELOCITY   = 100.0;
+        public static final double PIVOT_ACCELERATION      = 200.0;
+        public static final double PIVOT_kP                = 2.0;
+        public static final double PIVOT_kI                = 0.0;
+        public static final double PIVOT_kD                = 0.1;
         public static final double PIVOT_ANGLE_TOLERANCE_DEG = 1.0;
 
-        // ── Shot angle optimizer ──────────────────────────────────────────────
-        /** Minimum launch angle evaluated by ShotCalculator (degrees). */
-        public static final double MIN_LAUNCH_ANGLE_DEG = 20.0;
-        /** Maximum launch angle evaluated by ShotCalculator (degrees). */
-        public static final double MAX_LAUNCH_ANGLE_DEG = 75.0;
-        /** Sweep resolution (degrees). Smaller = more precise, slightly more CPU. */
-        public static final double ANGLE_SWEEP_STEP_DEG = 0.5;
+        // ── Shot angle optimizer (fixed angle — sweep is informational only) ──
+        public static final double MIN_LAUNCH_ANGLE_DEG  = 20.0;
+        public static final double MAX_LAUNCH_ANGLE_DEG  = 75.0;
+        public static final double ANGLE_SWEEP_STEP_DEG  = 0.5;
 
         /**
          * Scoring weights [flightTime, v₀, entryAngle, motorRPM].
-         * Must sum to 1.0. Higher entryAngle weight = accuracy-focused.
+         * Sum = 1.0. Higher entryAngle weight = accuracy-focused.
+         * Used by ShotCalculator for informational scoring only;
+         * RPM is now determined by interpolateRPM(), not the optimizer.
          */
         public static final double[] SHOT_SCORE_WEIGHTS = {0.15, 0.15, 0.55, 0.15};
 
@@ -368,46 +409,36 @@ public static final class AutoStartConstants {
         public static final double MIN_ENTRY_ANGLE_DEG = 25.0;
 
         // ── Alignment setpoints & tolerances ─────────────────────────────────
-        /**
-         * Desired standoff distance from the hub face to robot center (meters).
-         * Used as a fallback only; the physics-based optimal distance computed by
-         * {@code ShotCalculator.OPTIMAL_STANDOFF_M} replaces this at runtime.
-         */
-        public static final double DESIRED_DISTANCE_METERS = 2.5;
-
+        /** Fallback desired standoff distance (meters). */
+        public static final double DESIRED_DISTANCE_METERS   = 2.5;
         /** Acceptable distance error to allow firing (meters). */
         public static final double DISTANCE_TOLERANCE_METERS = 0.05;
-
-        // ── Optimal-distance sweep (used by ShotCalculator.findOptimalDistance) ──
-        /** Closest distance (m) the sweep will consider. */
-        public static final double OPTIMAL_DIST_MIN_M  = 1.5;
-        /** Farthest distance (m) the sweep will consider. */
-        public static final double OPTIMAL_DIST_MAX_M  = 6.0;
-        /** Resolution of the distance sweep (m). Smaller = more precise, slightly more startup CPU. */
-        public static final double OPTIMAL_DIST_STEP_M = 0.10;
-
         /** Acceptable heading error to allow firing (degrees). */
-        public static final double YAW_TOLERANCE_DEG = 1.5;
+        public static final double YAW_TOLERANCE_DEG         = 1.5;
+
+        // ── Optimal-distance sweep ────────────────────────────────────────────
+        public static final double OPTIMAL_DIST_MIN_M  = 1.5;
+        public static final double OPTIMAL_DIST_MAX_M  = 6.0;
+        public static final double OPTIMAL_DIST_STEP_M = 0.10;
 
         // ── Drive PID — HubAlignController ───────────────────────────────────
         public static final double DRIVE_kP            = 3.5;
         public static final double DRIVE_kD            = 0.15;
         public static final double DRIVE_MAX_SPEED_MPS = 3.0;
-        public static final double DRIVE_MAX_ACCEL     = 4.5; // m/s²
+        public static final double DRIVE_MAX_ACCEL     = 4.5;
 
         public static final double STRAFE_kP            = 3.5;
         public static final double STRAFE_kD            = 0.15;
         public static final double STRAFE_MAX_SPEED_MPS = 2.5;
 
-        public static final double ROTATION_kP             = 5.5;
-        public static final double ROTATION_kD             = 0.25;
-        public static final double ROTATION_MAX_RAD_S      = Math.PI * 2.0;
-        /** Max angular acceleration for the ProfiledPIDController (rad/s²). */
+        public static final double ROTATION_kP              = 5.5;
+        public static final double ROTATION_kD              = 0.25;
+        public static final double ROTATION_MAX_RAD_S       = Math.PI * 2.0;
         public static final double ROTATION_MAX_ACCEL_RAD_S2 = Math.PI * 4.0;
 
         /**
          * Low-pass filter alpha for drive output smoothing.
-         * Range (0, 1): smaller = more smoothing (more lag), larger = less smoothing.
+         * Range (0, 1): smaller = more smoothing, larger = less smoothing.
          */
         public static final double OUTPUT_FILTER_ALPHA = 0.20;
 
@@ -417,7 +448,62 @@ public static final class AutoStartConstants {
         /** Gravitational acceleration (m/s²). */
         public static final double g = 9.81;
 
+        public static final double FIXED_SHOT_RPM_M = 0;
+
         private ShooterConstants() {}
+    }
+
+    // =========================================================================
+    // TURRET
+    // =========================================================================
+
+    public static final class TurretConstants {
+
+        /** CAN ID for the turret Kraken X44. Set to the correct ID before deploy. */
+        public static final int    TURRET_MOTOR_ID  = 32;           // ← SET ME
+        public static final String TURRET_CAN_BUS   = "rio";
+
+        /**
+         * Motor turns per one full turret rotation.
+         * Measure your gearbox/belt reduction and set this before deploy.
+         * Example: a 20:1 reduction → 20.0
+         */
+        public static final double TURRET_GEAR_RATIO = 20.0;        // ← SET ME
+
+        // ── Soft travel limits ────────────────────────────────────────────────
+        /**
+         * Maximum degrees the turret may rotate to the RIGHT of straight-ahead.
+         * Start conservative (e.g. 90°), then increase until cords are at risk.
+         * The motor will hard-stop at this position via Phoenix software limits.
+         */
+        public static final double TURRET_FORWARD_LIMIT_DEG =  90.0; // ← TUNE ME
+
+        /**
+         * Maximum degrees the turret may rotate to the LEFT of straight-ahead.
+         * This is a negative value because left is the reverse direction.
+         */
+        public static final double TURRET_REVERSE_LIMIT_DEG = -90.0; // ← TUNE ME
+
+        // ── MotionMagic profile ───────────────────────────────────────────────
+        /** Cruise velocity in mechanism rotations/sec (turret, not motor). */
+        public static final double TURRET_CRUISE_VEL_RPS  = 1.0;    // ← TUNE ME
+        /** Acceleration in mechanism rotations/sec² (turret, not motor). */
+        public static final double TURRET_ACCEL_RPS2      = 2.0;    // ← TUNE ME
+
+        // ── Position PID (Slot 0, MotionMagicVoltage) ────────────────────────
+        public static final double TURRET_kP = 24.0;  // ← TUNE ME
+        public static final double TURRET_kI =  0.0;
+        public static final double TURRET_kD =  0.5;  // ← TUNE ME
+        public static final double TURRET_kS =  0.0;  // static friction — add after SysId
+        public static final double TURRET_kV =  0.0;  // velocity feed-forward — add after SysId
+
+        /** Tolerance for "at target" check (degrees). */
+        public static final double TURRET_ANGLE_TOLERANCE_DEG = 1.0;
+
+        /** Stator current limit (Amps). */
+        public static final double TURRET_STATOR_LIMIT_AMPS = 40.0;
+
+        private TurretConstants() {}
     }
 
     // =========================================================================
