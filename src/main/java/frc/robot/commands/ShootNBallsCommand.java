@@ -10,8 +10,7 @@ import frc.robot.subsystems.Shooter.ShooterSubsystem;
  *
  * <h3>Sequence (per ball)</h3>
  * <ol>
- *   <li>Wait for flywheel to reach target RPM (max {@link #SPINUP_TIMEOUT_S}).</li>
- *   <li>Call {@link ShooterSubsystem#shoot()} — one ball expelled per call.</li>
+ *   <li>Call {@link ShooterSubsystem#shoot()} immediately — flywheel is pre-spun by caller.</li>
  *   <li>Wait {@link #CYCLE_TIME_S} for the feeder to advance the next ball.</li>
  * </ol>
  *
@@ -21,13 +20,10 @@ import frc.robot.subsystems.Shooter.ShooterSubsystem;
  */
 public class ShootNBallsCommand extends Command {
 
-    /** Max time to wait for flywheel spin-up before forcing the shot anyway. */
-    private static final double SPINUP_TIMEOUT_S = 2.0;
-
     /** Time between shots for the feeder to cycle the next ball. */
     private static final double CYCLE_TIME_S = 0.4;
 
-    private enum Phase { SPIN_UP, SHOOTING, CYCLING, DONE }
+    private enum Phase { SHOOTING, CYCLING, DONE }
 
     private final ShooterSubsystem m_shooter;
     private final int              m_totalBalls;
@@ -51,8 +47,8 @@ public class ShootNBallsCommand extends Command {
 
     @Override
     public void initialize() {
-        m_phase      = Phase.SPIN_UP;
-        m_ballsFired = 0;
+        m_phase       = Phase.SHOOTING;
+        m_ballsFired  = 0;
         m_phaseStartS = Timer.getFPGATimestamp();
         m_shooter.setFlywheelRPM(m_targetRPM);
     }
@@ -64,26 +60,18 @@ public class ShootNBallsCommand extends Command {
 
         switch (m_phase) {
 
-            case SPIN_UP -> {
-                // Wait for flywheel OR timeout
-                if (m_shooter.isAtTargetRPM(m_targetRPM) || elapsed >= SPINUP_TIMEOUT_S) {
-                    m_phase      = Phase.SHOOTING;
-                    m_phaseStartS = now;
-                }
-            }
-
             case SHOOTING -> {
                 m_shooter.shoot();
                 m_ballsFired++;
-                m_phase      = (m_ballsFired >= m_totalBalls) ? Phase.DONE : Phase.CYCLING;
+                m_phase       = (m_ballsFired >= m_totalBalls) ? Phase.DONE : Phase.CYCLING;
                 m_phaseStartS = now;
             }
 
             case CYCLING -> {
-                // Keep flywheel spinning while feeder advances
+                // Keep flywheel at speed while feeder advances the next ball
                 m_shooter.setFlywheelRPM(m_targetRPM);
                 if (elapsed >= CYCLE_TIME_S) {
-                    m_phase      = Phase.SPIN_UP; // re-check speed for next ball
+                    m_phase       = Phase.SHOOTING;
                     m_phaseStartS = now;
                 }
             }

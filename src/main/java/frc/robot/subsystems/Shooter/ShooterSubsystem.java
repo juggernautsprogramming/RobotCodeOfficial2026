@@ -53,6 +53,11 @@ public class ShooterSubsystem extends SubsystemBase {
         }
     }
 
+    // ── Fire control solver (shoot-on-the-move) ───────────────────────────────
+    // Combines RK4 physics-derived TOF with empirical RPM data.
+    // Used by DriveToHubAndShootCommand for Newton-method SOTM correction.
+    private final FireControlSolver m_fireControl;
+
     // ── SysId routine ─────────────────────────────────────────────────────────
     // Initialized in the constructor (after m_flywheelLeader is assigned).
     // Use sysIdQuasistatic() and sysIdDynamic() command factories in RobotContainer.
@@ -77,6 +82,8 @@ public class ShooterSubsystem extends SubsystemBase {
 
         configurePivot();
         configureFlywheel();
+
+        m_fireControl = initFireControl();
 
         m_sysIdRoutine = new SysIdRoutine(
             new SysIdRoutine.Config(
@@ -242,6 +249,68 @@ public class ShooterSubsystem extends SubsystemBase {
         SmartDashboard.putBoolean("Shooter/At Target RPM",       isAtTargetRPM(m_targetRPM));
         SmartDashboard.putBoolean("Shooter/Is Shooting",         m_isShooting);
         SmartDashboard.putBoolean("Shooter/Ready To Shoot",      isReadyToShoot());
+    }
+
+    // ── Fire control ─────────────────────────────────────────────────────────
+
+    /**
+     * Returns the FireControlSolver for use in DriveToHubAndShootCommand.
+     * Call {@link FireControlSolver#calculate} once per loop cycle.
+     */
+    public FireControlSolver getFireControlSolver() {
+        return m_fireControl;
+    }
+
+    /**
+     * Build and populate the FireControlSolver at startup.
+     * Uses RK4 physics (FireControlSimulator) to derive time-of-flight values,
+     * then overrides RPM with the empirically-confirmed RPM_DISTANCE_TABLE.
+     * Takes ~200ms — call from constructor, not from periodic().
+     */
+    private static FireControlSolver initFireControl() {
+        // ── Solver config ────────────────────────────────────────────────────
+        FireControlSolver.Config cfg = new FireControlSolver.Config();
+        cfg.launcherOffsetX      = ShooterConstants.SHOOTER_X_OFFSET_METERS; // 0.20 m
+        cfg.launcherOffsetY      = 0.0;
+        cfg.minScoringDistance   = 0.5;
+        cfg.maxScoringDistance   = 5.5;
+        cfg.maxTiltDeg           = 90.0; // disable tilt gate (pitch/roll not wired)
+        FireControlSolver solver = new FireControlSolver(cfg);
+
+        // ── Physics simulation to obtain TOF values ──────────────────────────
+        // Ball parameters — update ballMassKg and ballDiameterM if game manual
+        // specifies different values for the 2026 game piece.
+        FireControlSimulator.SimParameters simParams = new FireControlSimulator.SimParameters(
+            0.215,                                               // ballMassKg (~9.5 oz FRC ball)
+            0.1501,                                              // ballDiameterM (~5.9 in)
+            0.47,                                               // dragCoeff (smooth sphere)
+            0.0,                                                // magnusCoeff (disabled)
+            1.225,                                              // airDensity kg/m³
+            ShooterConstants.SHOOTER_EXIT_HEIGHT_METERS,        // 0.52 m
+            ShooterConstants.WHEEL_DIAMETER_INCHES * 0.0254,    // 0.1016 m
+            ShooterConstants.HUB_TARGET_HEIGHT_METERS,          // 2.64 m
+            ShooterConstants.EFFICIENCY,                        // 0.424 slip factor
+            ShooterConstants.FIXED_SHOT_ANGLE_DEG,              // 61.5°
+            0.001,   // sim timestep (s)
+            1500, 6000, 25, 5.0                                  // RPM range, search iters, max time
+        );
+
+        FireControlSimulator sim = new FireControlSimulator(simParams);
+        FireControlSimulator.GeneratedLUT lut = sim.generateLUT();
+
+        // Load physics-derived entries, then override RPM with empirical table
+        for (FireControlSimulator.LUTEntry e : lut.entries()) {
+            if (!e.reachable()) continue;
+            // Physics RPM from simulation; empirical lookup overrides if in range
+            double rpm = m_rpmTable.get(e.distanceM()); // InterpolatingDoubleTreeMap interpolates
+            solver.loadLUTEntry(e.distanceM(), rpm, e.tof());
+        }
+
+        System.out.printf("[ShooterSubsystem] FireControlSolver ready: %d/%d entries, max %.2f m, LUT took %dms%n",
+            lut.reachableCount(), lut.reachableCount() + lut.unreachableCount(),
+            lut.maxRangeM(), lut.generationTimeMs());
+
+        return solver;
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────

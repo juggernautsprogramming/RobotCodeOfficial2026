@@ -12,8 +12,11 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+
 import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Shooter.FireControlSolver;
 import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Shooter.ShotCalculator;
 import frc.robot.subsystems.Shooter.VelocityCompensator;
@@ -60,13 +63,16 @@ public class DriveToHubAndShootCommand extends Command {
     private final HubAlignController      m_alignCtrl = new HubAlignController();
 
     // ── Per-run state ─────────────────────────────────────────────────────────
-    private State    m_state;
-    private double   m_startTimeS;
-    private double   m_allGreenStartS;
-    private double   m_targetRPM;
-    private double   m_targetHoodDeg;
+    private State      m_state;
+    private double     m_startTimeS;
+    private double     m_allGreenStartS;
+    private double     m_targetRPM;
+    private double     m_targetHoodDeg;
+    private Rotation2d m_aimAngle      = new Rotation2d();
+    private double     m_fcConfidence  = 0.0;
+    private double     m_angularVelFF  = 0.0;
     /** The field-relative pose the robot should drive to before shooting. */
-    private Pose2d   m_targetPose;
+    private Pose2d     m_targetPose;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public DriveToHubAndShootCommand(
@@ -136,22 +142,47 @@ public class DriveToHubAndShootCommand extends Command {
         Translation2d alignTarget = getAlignTarget();
         double distToHub     = new Translation2d(shooterX, shooterY).getDistance(alignTarget);
 
-        // Velocity-compensated virtual distance
-        var comp = VelocityCompensator.getInstance().compensate(
-            new Translation2d(shooterX, shooterY), alignTarget,
-            speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+        // ── Fire control: Newton-method SOTM solver ───────────────────────────
+        // Passes field-relative speeds as both fieldVelocity and robotVelocity.
+        // hubForward = (0,0) disables the behind-hub safety check (safe default).
+        ChassisSpeeds fieldSpeeds = new ChassisSpeeds(
+            speeds.vxMetersPerSecond, speeds.vyMetersPerSecond, speeds.omegaRadiansPerSecond);
+        FireControlSolver.ShotInputs fcInputs = new FireControlSolver.ShotInputs(
+            robotPose, fieldSpeeds, fieldSpeeds,
+            alignTarget,
+            new Translation2d(0, 0), // hub forward: disabled
+            1.0);                    // vision confidence
 
-        ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
-        m_targetRPM     = shot.rpm();
-        m_targetHoodDeg = shot.hoodDeg();
+        final FireControlSolver.LaunchParameters fcResult =
+            m_shooter.getFireControlSolver().calculate(fcInputs);
+
+        if (fcResult.isValid()) {
+            m_targetRPM    = fcResult.rpm();
+            m_targetHoodDeg = ShooterConstants.FIXED_SHOT_ANGLE_DEG;
+            m_aimAngle     = fcResult.driveAngle();
+            m_fcConfidence = fcResult.confidence();
+            m_angularVelFF = fcResult.driveAngularVelocityRadPerSec();
+        } else {
+            // Fallback: simple iterative velocity compensator
+            var comp = VelocityCompensator.getInstance().compensate(
+                new Translation2d(shooterX, shooterY), alignTarget,
+                speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+            ShotCalculator.ShotResult shot = ShotCalculator.calculate(comp.virtualDistanceMeters());
+            m_targetRPM     = shot.rpm();
+            m_targetHoodDeg = shot.hoodDeg();
+            m_aimAngle      = new Rotation2d(Math.toRadians(comp.aimHeadingDeg()));
+            m_fcConfidence  = 0.0;
+            m_angularVelFF  = 0.0;
+        }
 
         // Shooter runs every tick regardless of state (1323 pre-spin)
         m_shooter.setFlywheelRPM(m_targetRPM);
         m_shooter.setLaunchAngleDeg(m_targetHoodDeg);
 
-        // Rotation output from HubAlignController (ProfiledPID toward tag/hub)
-        HubAlignController.DriveOutput alignOut =
-            m_alignCtrl.compute(m_drivetrain, alignTarget, ShotCalculator.OPTIMAL_STANDOFF_M);
+        // Rotation output from HubAlignController using fire control aim angle + FF
+        HubAlignController.DriveOutput alignOut = m_alignCtrl.compute(
+            m_drivetrain, alignTarget, ShotCalculator.OPTIMAL_STANDOFF_M,
+            m_aimAngle, m_angularVelFF);
 
         boolean inZone = distToHub >= ZONE_MIN_M && distToHub <= ZONE_MAX_M;
 
@@ -197,9 +228,10 @@ public class DriveToHubAndShootCommand extends Command {
 
                 boolean aligned    = m_alignCtrl.isAligned();
                 boolean atDist     = inZone;
-                boolean atVelocity = m_shooter.isAtTargetRPM(m_targetRPM);
+                boolean atVelocity = m_shooter.isAtTargetRPM(m_targetRPM); // telemetry only
                 boolean hubActive  = isHubConfirmedActive();
-                boolean allGreen   = aligned && atDist && atVelocity && hubActive;
+                boolean confident  = m_fcConfidence > 40.0 || m_fcConfidence == 0.0; // 0 = fallback mode
+                boolean allGreen   = aligned && atDist && hubActive && confident;
 
                 if (allGreen) {
                     if (Double.isNaN(m_allGreenStartS))
@@ -223,7 +255,7 @@ public class DriveToHubAndShootCommand extends Command {
                     m_allGreenStartS = Double.NaN;
                 }
 
-                publishFireGate(aligned, atDist, atVelocity, hubActive);
+                publishFireGate(aligned, atDist, atVelocity, hubActive, confident);
             }
 
             case FIRING -> {
@@ -246,11 +278,15 @@ public class DriveToHubAndShootCommand extends Command {
         SmartDashboard.putNumber ("DTHS2/DistError_m", distToHub - ShotCalculator.OPTIMAL_STANDOFF_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMin_m",   ZONE_MIN_M);
         SmartDashboard.putNumber ("DTHS2/ZoneMax_m",   ZONE_MAX_M);
-        SmartDashboard.putNumber ("DTHS2/TargetRPM",   m_targetRPM);
-        SmartDashboard.putNumber ("DTHS2/HoodDeg",     m_targetHoodDeg);
-        SmartDashboard.putNumber ("DTHS2/VirtDist_m",  comp.virtualDistanceMeters());
-        SmartDashboard.putNumber ("DTHS2/ElapsedS",    elapsed);
-        SmartDashboard.putBoolean("DTHS2/TimedOut",    elapsed >= MAX_RUNTIME_S);
+        SmartDashboard.putNumber ("DTHS2/TargetRPM",    m_targetRPM);
+        SmartDashboard.putNumber ("DTHS2/HoodDeg",      m_targetHoodDeg);
+        SmartDashboard.putNumber ("DTHS2/FC/Confidence",m_fcConfidence);
+        SmartDashboard.putNumber ("DTHS2/FC/SolvedDist",fcResult.isValid() ? fcResult.solvedDistanceM() : -1);
+        SmartDashboard.putNumber ("DTHS2/FC/TOF_s",     fcResult.isValid() ? fcResult.timeOfFlightSec() : -1);
+        SmartDashboard.putNumber ("DTHS2/FC/Iterations", fcResult.isValid() ? fcResult.iterationsUsed() : -1);
+        SmartDashboard.putBoolean("DTHS2/FC/Valid",     fcResult.isValid());
+        SmartDashboard.putNumber ("DTHS2/ElapsedS",     elapsed);
+        SmartDashboard.putBoolean("DTHS2/TimedOut",     elapsed >= MAX_RUNTIME_S);
     }
 
     @Override
@@ -294,13 +330,14 @@ public class DriveToHubAndShootCommand extends Command {
     }
 
     private void publishFireGate(
-            boolean aligned, boolean atDist, boolean atVelocity, boolean hubActive) {
+            boolean aligned, boolean atDist, boolean atVelocity, boolean hubActive, boolean confident) {
         SmartDashboard.putBoolean("DTHS2/Gate/Aligned",    aligned);
         SmartDashboard.putBoolean("DTHS2/Gate/AtDist",     atDist);
         SmartDashboard.putBoolean("DTHS2/Gate/AtVelocity", atVelocity);
         SmartDashboard.putBoolean("DTHS2/Gate/HubActive",  hubActive);
+        SmartDashboard.putBoolean("DTHS2/Gate/Confident",  confident);
         SmartDashboard.putBoolean("DTHS2/Gate/FIRE",
-            aligned && atDist && atVelocity && hubActive);
+            aligned && atDist && atVelocity && hubActive && confident);
         SmartDashboard.putNumber ("DTHS2/Gate/HoldTime_s",
             Double.isNaN(m_allGreenStartS) ? 0.0
                 : Timer.getFPGATimestamp() - m_allGreenStartS);

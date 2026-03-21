@@ -377,18 +377,16 @@ public class RobotContainer {
     )
 );
 
-        // B: Toggle feeder — only feeds once flywheel reaches target RPM
+        // B: Toggle feeder — waits for flywheel to reach speed, then latches on until toggled off
         m_playerStick.b().toggleOnTrue(
-            Commands.run(
-                () -> {
-                    if (shooterSubsystem.isReadyToShoot()) {
-                        feederSubsystem.setPower(5.0);
-                    } else {
-                        feederSubsystem.stop();
-                    }
-                },
-                feederSubsystem
-            ).finallyDo(feederSubsystem::stop)
+            Commands.sequence(
+                Commands.waitUntil(shooterSubsystem::isReadyToShoot),
+                Commands.startEnd(
+                    () -> feederSubsystem.setPower(5.0),
+                    feederSubsystem::stop,
+                    feederSubsystem
+                )
+            )
         );
 
         // X: Toggle shooter flywheel — spin up to fixed RPM from Constants  ↔  idle

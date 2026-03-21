@@ -4,6 +4,7 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -175,6 +176,86 @@ public class HubAlignController {
         SmartDashboard.putNumber ("HubAlign/FilteredVx",      m_filteredVx);
         SmartDashboard.putNumber ("HubAlign/FilteredVy",      m_filteredVy);
         SmartDashboard.putNumber ("HubAlign/ProfileOmega",    m_rotPID.getSetpoint().velocity);
+        SmartDashboard.putBoolean("HubAlign/RotAligned",      isAligned());
+        SmartDashboard.putBoolean("HubAlign/DistAtTarget",    m_drivePID.atSetpoint());
+
+        return new DriveOutput(vx, vy, omega);
+    }
+
+    /**
+     * Overload that accepts a pre-computed aim angle from FireControlSolver.
+     * Uses the solver's drag-compensated, Newton-method aim heading instead of
+     * the internal VelocityCompensator call. Also accepts an angular velocity
+     * feedforward term to reduce heading lag during rotation.
+     *
+     * @param drivetrain       Live drivetrain for pose + velocity.
+     * @param hubPose          Hub centre, field-relative (metres).
+     * @param desiredStandoff  Target distance from hub to robot centre (metres).
+     * @param aimAngle         Aim heading from FireControlSolver.LaunchParameters.driveAngle().
+     * @param angularVelFF     Angular velocity feedforward (rad/s) from LaunchParameters.driveAngularVelocityRadPerSec().
+     */
+    public DriveOutput compute(
+            CommandSwerveDrivetrain drivetrain,
+            Translation2d           hubPose,
+            double                  desiredStandoff,
+            Rotation2d              aimAngle,
+            double                  angularVelFF) {
+
+        Pose2d robotPose = drivetrain.getState().Pose;
+
+        m_desiredHeadingDeg = aimAngle.getDegrees();
+        double currentHeadingDeg = robotPose.getRotation().getDegrees();
+        m_lastHeadingDeg         = currentHeadingDeg;
+
+        double currentHeadingRad = Math.toRadians(currentHeadingDeg);
+        double desiredHeadingRad = aimAngle.getRadians();
+
+        if (!m_hasComputed) {
+            m_rotPID.reset(currentHeadingRad);
+        }
+        m_hasComputed = true;
+
+        // Profiled PID + angular velocity feedforward from fire control solver
+        double rawRot = m_rotPID.calculate(currentHeadingRad, desiredHeadingRad) + angularVelFF;
+        rawRot = MathUtil.clamp(rawRot,
+            -ShooterConstants.ROTATION_MAX_RAD_S,
+             ShooterConstants.ROTATION_MAX_RAD_S);
+
+        // Range drive: project correction along bearing to hub
+        double bearingRad  = Math.atan2(
+            hubPose.getY() - robotPose.getY(),
+            hubPose.getX() - robotPose.getX());
+        double currentDist = robotPose.getTranslation().getDistance(hubPose);
+        double rawDrive    = -m_drivePID.calculate(currentDist, desiredStandoff);
+        rawDrive = MathUtil.clamp(rawDrive,
+            -ShooterConstants.DRIVE_MAX_SPEED_MPS,
+             ShooterConstants.DRIVE_MAX_SPEED_MPS);
+
+        double rawVx = rawDrive * Math.cos(bearingRad);
+        double rawVy = rawDrive * Math.sin(bearingRad);
+
+        // EMA output filter
+        double alpha  = ShooterConstants.OUTPUT_FILTER_ALPHA;
+        m_filteredVx  = alpha * rawVx  + (1.0 - alpha) * m_filteredVx;
+        m_filteredVy  = alpha * rawVy  + (1.0 - alpha) * m_filteredVy;
+        m_filteredRot = alpha * rawRot + (1.0 - alpha) * m_filteredRot;
+
+        double vx    = deadband(m_filteredVx,  ShooterConstants.VELOCITY_DEADBAND);
+        double vy    = deadband(m_filteredVy,  ShooterConstants.VELOCITY_DEADBAND);
+        double omega = deadband(m_filteredRot, ShooterConstants.VELOCITY_DEADBAND);
+
+        // Telemetry (same keys as original compute())
+        double headingErrorDeg = ((currentHeadingDeg - m_desiredHeadingDeg + 180.0) % 360.0) - 180.0;
+        SmartDashboard.putNumber ("HubAlign/DesiredHeading",  m_desiredHeadingDeg);
+        SmartDashboard.putNumber ("HubAlign/CurrentHeading",  currentHeadingDeg);
+        SmartDashboard.putNumber ("HubAlign/HeadingError",    headingErrorDeg);
+        SmartDashboard.putNumber ("HubAlign/DistanceError",   currentDist - desiredStandoff);
+        SmartDashboard.putNumber ("HubAlign/RawVx",           rawVx);
+        SmartDashboard.putNumber ("HubAlign/RawVy",           rawVy);
+        SmartDashboard.putNumber ("HubAlign/FilteredVx",      m_filteredVx);
+        SmartDashboard.putNumber ("HubAlign/FilteredVy",      m_filteredVy);
+        SmartDashboard.putNumber ("HubAlign/ProfileOmega",    m_rotPID.getSetpoint().velocity);
+        SmartDashboard.putNumber ("HubAlign/AngularVelFF",    angularVelFF);
         SmartDashboard.putBoolean("HubAlign/RotAligned",      isAligned());
         SmartDashboard.putBoolean("HubAlign/DistAtTarget",    m_drivePID.atSetpoint());
 
