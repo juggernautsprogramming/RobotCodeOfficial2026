@@ -125,6 +125,38 @@ public class TurretSubsystem extends SubsystemBase {
     }
 
     /**
+     * Commands the turret to a robot-frame angle with an angular velocity feedforward.
+     * Use this for auto-aim where robot rotation must be cancelled in real time.
+     *
+     * <p>The feedforward is converted to volts via {@code kV} (V·s/rot). With the default
+     * {@code TURRET_kV = 0.0} the position loop runs alone; tune kV on the field to make
+     * the turret lead during fast robot rotation.
+     *
+     * @param degrees      Target turret angle, robot-frame. 0 = straight ahead, + = right.
+     * @param ffRadPerSec  Feedforward angular velocity (rad/s). Positive = clockwise.
+     *                     Pass 0.0 for pure position control.
+     */
+    public void setAngleDegWithFF(double degrees, double ffRadPerSec) {
+        double command;
+        if (degrees > TurretConstants.TURRET_FORWARD_LIMIT_DEG) {
+            command     = TurretConstants.TURRET_REVERSE_LIMIT_DEG;
+            m_isFlipped = true;
+        } else if (degrees < TurretConstants.TURRET_REVERSE_LIMIT_DEG) {
+            command     = TurretConstants.TURRET_FORWARD_LIMIT_DEG;
+            m_isFlipped = true;
+        } else {
+            command     = degrees;
+            m_isFlipped = false;
+        }
+        m_targetDeg = command;
+        // ffRps: desired turret output-shaft velocity in rot/s
+        // ffVoltage: additional voltage bias (kV * ffRps). Zero until TURRET_kV is tuned.
+        double ffRps     = ffRadPerSec / (2.0 * Math.PI);
+        double ffVoltage = ffRps * TurretConstants.TURRET_kV;
+        m_motor.setControl(m_mmRequest.withPosition(command / 360.0).withFeedForward(ffVoltage));
+    }
+
+    /**
      * Open-loop drive. power [-1, 1]: positive = right, negative = left.
      * Hitting a cord-safety limit while still driving into it triggers a
      * full-speed MotionMagic flip to the opposite limit.

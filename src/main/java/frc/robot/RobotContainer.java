@@ -45,8 +45,10 @@ import frc.robot.subsystems.Turret.TurretSubsystem;
 
 // Commands
 import frc.robot.commands.DriveToHubAndShoot;
+import frc.robot.commands.SnapAimAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurnToAngle;
+import frc.robot.commands.TurretAutoAimCommand;
 
 /**
  * RobotContainer — wires together all subsystems and button bindings.
@@ -58,7 +60,7 @@ import frc.robot.commands.TurnToAngle;
  *   Left  Trigger       — Turn sensitivity reduction (0% = full, 100% = 20%)
  *   Right Trigger       — Turbo mode (boosts translation speed for bumps)
  *   Right Bumper        — Auto-align to AprilTag (hold)
- *   B Button            — Drive to Hub + Shoot
+ *   B / X Button        — Drive to Hub + Shoot
  *   Left  Bumper        — Gyro reset
  *   A Button            — Emergency brake
  *   Y Button            — Quick turn to 45°
@@ -68,12 +70,27 @@ import frc.robot.commands.TurnToAngle;
  * <h3>Button map (Operator — port 1)</h3>
  * <pre>
  *   A Button             — Toggle intake (deploy + all rollers ↔ retract + 3s roller push)
- *   B Button             — Toggle feeder (run forward ↔ stop)
- *   X Button             — Toggle shooter flywheel
- *   Left Trigger  (hold) — Climber up,   hold position on release
+ *   B Button             — Toggle feeder (waits for RPM, then runs ↔ stop)
+ *   X Button             — D-pad modifier (hold while pressing D-pad for bank 2)
+ *   Left  Trigger (hold) — Climber up,   hold position on release
  *   Right Trigger (hold) — Climber down, hold position on release
- *   Left Bumper          — Eject (all intake motors reverse, hold)
- *   Right Bumper         — Reverse feeder (hold)
+ *   Left  Bumper  (hold) — Eject (all intake motors reverse)
+ *   Right Bumper         — Reverse feeder (toggle)
+ *   Left  Stick  (press) — Snap-aim-and-shoot (turret locks to hub tag → spins up → fires)
+ *   Right Stick  (press) — Toggle turret auto-aim (hub track w/ SOTM + vision blend)
+ *   Y Button             — Zero turret (point straight ahead first)
+ *
+ *   D-Pad (no X held):
+ *     Up    — Flywheel @ 1.5 m tape  (1729 RPM ★ confirmed)
+ *     Right — Flywheel @ 2.0 m tape  (~1995 RPM)
+ *     Down  — Flywheel @ 2.5 m tape  (2081 RPM ★ confirmed)
+ *     Left  — Flywheel @ 3.0 m tape  (~2430 RPM)
+ *   D-Pad (hold X):
+ *     Up    — Flywheel @ 3.5 m tape  (~2620 RPM)
+ *     Right — Flywheel @ 4.0 m tape  (2570 RPM ★ confirmed)
+ *     Down  — Flywheel @ 4.5 m tape  (~2815 RPM)
+ *     Left  — Flywheel @ 5.0 m tape  (interpolated)
+ *   Hold D-pad to spin; release to idle flywheel.
  * </pre>
  */
 public class RobotContainer {
@@ -389,14 +406,7 @@ public class RobotContainer {
             )
         );
 
-        // X: Toggle shooter flywheel — spin up to fixed RPM from Constants  ↔  idle
-        m_playerStick.x().toggleOnTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPM(0),
-                shooterSubsystem::idleFlywheel,
-                shooterSubsystem
-            )
-        );
+        // X: hold as D-pad modifier (see D-Pad section below — no standalone action)
 
         // Left Trigger (operator): Climber up (hold), hold position on release
         m_playerStick.leftTrigger().whileTrue(
@@ -432,56 +442,43 @@ public class RobotContainer {
             )
         );
 
-        // ── Operator D-Pad: distance-based RPM presets ───────────────────────
-        // Each direction selects a fixed-RPM preset; flywheel on/off is still X.
-        // Up    ≈ 1.5 m  → PRESET_CLOSE_RPM
-        m_playerStick.povUp().toggleOnTrue(
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_CLOSE_RPM),
-                shooterSubsystem
-            )
-        ).onFalse (
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(0),
-                shooterSubsystem
-            )
-        );
-        // Right ≈ 2.5 m  → PRESET_MID_RPM
-        m_playerStick.povRight().toggleOnTrue(
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_MID_RPM),
-                shooterSubsystem
-            )
-        ).onFalse (
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(0),
-                shooterSubsystem
-            )
-        );
-        // Down  ≈ 4.0 m  → PRESET_FAR_RPM
-        m_playerStick.povDown().toggleOnTrue(
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_FAR_RPM),
-                shooterSubsystem
-            )
-        ).onFalse (
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(0),
-                shooterSubsystem
-            )
-        );
-        // Left  ≈ 5.5 m  → PRESET_VFAR_RPM
-        m_playerStick.povLeft().toggleOnTrue(
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(ShooterConstants.PRESET_VFAR_RPM),
-                shooterSubsystem
-            )
-        ).onFalse (
-            Commands.runOnce(
-                () -> shooterSubsystem.setFlywheelRPM(0),
-                shooterSubsystem
-            )
-        );
+        // ── Operator D-Pad: distance-based RPM presets (hold to spin, release to idle) ─
+        // Without X:  Up=1.5m  Right=2.0m  Down=2.5m  Left=3.0m
+        // Hold X:     Up=3.5m  Right=4.0m  Down=4.5m  Left=5.0m
+        // RPM interpolated live from RPM_DISTANCE_TABLE.
+        m_playerStick.povUp().and(m_playerStick.x().negate()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_CLOSE_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povRight().and(m_playerStick.x().negate()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_2M_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povDown().and(m_playerStick.x().negate()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_MID_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povLeft().and(m_playerStick.x().negate()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_3M_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+
+        m_playerStick.povUp().and(m_playerStick.x()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_3_5M_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povRight().and(m_playerStick.x()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_FAR_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povDown().and(m_playerStick.x()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_4_5M_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
+        m_playerStick.povLeft().and(m_playerStick.x()).whileTrue(
+            Commands.startEnd(
+                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_5M_DIST_M),
+                shooterSubsystem::idleFlywheel, shooterSubsystem));
 
         // ── Turret: right joystick X = manual drive, Y button = zero ─────────
         // Right joystick X on operator controller drives the turret open-loop.
@@ -497,6 +494,18 @@ public class RobotContainer {
         // Y: zero turret — point straight ahead then press this
         m_playerStick.y().onTrue(
             Commands.runOnce(turretSubsystem::zeroPosition, turretSubsystem)
+        );
+
+        // Left Stick (LS/L3): Snap-aim-and-shoot — turret locks to hub tag, spins up, fires one ball
+        m_playerStick.leftStick().whileTrue(
+            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, turretSubsystem, feederSubsystem, visionSubsystem)
+        );
+
+        // Right Stick (RS/R3): Toggle turret auto-aim
+        // Active: turret tracks velocity-compensated hub via FireControlSolver (SOTM + rotation cancel).
+        // Inactive: right joystick X manual control resumes automatically.
+        m_playerStick.rightStick().toggleOnTrue(
+            new TurretAutoAimCommand(drivetrain, shooterSubsystem, turretSubsystem, visionSubsystem)
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────

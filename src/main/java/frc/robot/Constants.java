@@ -345,12 +345,12 @@ public final class Constants {
         // Tape distances (bumper→face) shown in comments for field reference.
         // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
         // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
-        public static final double PRESET_CLOSE_RPM    = 1850.0;
-        public static final double PRESET_CLOSE_DIST_M = 1.153; // tape: 1.5 m  ★ confirmed
-        public static final double PRESET_MID_RPM      = 2081.0;
-        public static final double PRESET_MID_DIST_M   = 2.153; // tape: 2.5 m  ★ confirmed
-        public static final double PRESET_FAR_RPM      = 2570.0;
-        public static final double PRESET_FAR_DIST_M   = 3.653; // tape: 4.0 m  ★ confirmed
+        public static final double PRESET_CLOSE_RPM    = 1850.0; // ★ confirmed
+        public static final double PRESET_CLOSE_DIST_M = 1.153; // tape: 1.5 m
+        public static final double PRESET_MID_RPM      = 2200.0; // ★ confirmed (updated from 2081)
+        public static final double PRESET_MID_DIST_M   = 2.153; // tape: 2.5 m
+        public static final double PRESET_FAR_RPM      = 2680.0; // ★ confirmed (updated from 2570)
+        public static final double PRESET_FAR_DIST_M   = 3.653; // tape: 4.0 m
         public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
         public static final double PRESET_VFAR_DIST_M  = 5.153; // tape: 5.5 m  ⚠ unconfirmed
 
