@@ -55,13 +55,13 @@ public class SnapAimAndShootCommand extends Command {
     // ── Tunable constants ─────────────────────────────────────────────────────
 
     /** Seconds turret + RPM must both be on target before the feeder fires. */
-    private static final double SETTLE_S = 0.10;
+    private static final double SETTLE_S = 0.20;  // Increased from 0.10 to ensure first ball gets full RPM
 
     /** Seconds to run the feeder per ball. */
-    private static final double FEED_S = 0.30;
+    private static final double FEED_S = 0.28;
 
     /** Feeder duty cycle while feeding (0–1, fraction of battery voltage). */
-    private static final double FEED_DUTY = 0.55;
+    private static final double FEED_DUTY = 0.65;
 
     /** Vision blend weight — 0 = pure odometry aim, 1 = pure vision aim. */
     private static final double VISION_WEIGHT = 0.6;

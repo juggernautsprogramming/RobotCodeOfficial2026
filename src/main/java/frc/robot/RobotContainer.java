@@ -13,6 +13,7 @@ import com.pathplanner.lib.util.PathPlannerLogging;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.filter.SlewRateLimiter;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
@@ -25,7 +26,9 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.littletonrobotics.junction.Logger;
 
 // Constants
+import frc.robot.Constants.ControlDeadbands;
 import frc.robot.Constants.DriveToPoseConstants;
+import frc.robot.Constants.FeederConstants;
 import frc.robot.Constants.ShooterConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants;
@@ -48,8 +51,8 @@ import frc.robot.commands.AutoClimbCommand;
 import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.SnapAimAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
-import frc.robot.commands.TurnToAngle;
-import frc.robot.commands.TurretAutoAimCommand;
+import frc.robot.commands.TurretAprilTagAimCommand;
+import frc.robot.commands.TurretOdometryAimCommand;
 
 /**
  * RobotContainer — wires together all subsystems and button bindings.
@@ -61,10 +64,11 @@ import frc.robot.commands.TurretAutoAimCommand;
  *   Left  Trigger       — Turn sensitivity reduction (0% = full, 100% = 20%)
  *   Right Trigger       — Turbo mode (boosts translation speed for bumps)
  *   Right Bumper        — Auto-align to AprilTag (hold)
- *   B / X Button        — Drive to Hub + Shoot
+ *   B Button            — Hold 45° field heading while driving (bump crossing, hold)
+ *   X Button            — Drive to Hub + Shoot
  *   Left  Bumper        — Gyro reset
  *   A Button            — Emergency brake
- *   Y Button            — Quick turn to 45°
+ *   Y Button            — Flip 180° relative to current heading
  *   D-Pad               — Precision nudge
  * </pre>
  *
@@ -72,7 +76,7 @@ import frc.robot.commands.TurretAutoAimCommand;
  * <pre>
  *   A Button             — Toggle intake (deploy + all rollers ↔ retract + 3s roller push)
  *   B Button             — Toggle feeder (waits for RPM, then runs ↔ stop)
- *   X Button             — D-pad modifier (hold while pressing D-pad for bank 2)
+ *   X Button             — Toggle RPM on/off (standalone) OR D-pad modifier (hold while pressing D-pad for bank 2)
  *   Left  Trigger (hold) — Climber up,   hold position on release
  *   Right Trigger (hold) — Climber down, hold position on release
  *   Left  Bumper  (hold) — Eject (all intake motors reverse)
@@ -81,17 +85,17 @@ import frc.robot.commands.TurretAutoAimCommand;
  *   Right Stick  (press) — Toggle turret auto-aim (hub track w/ SOTM + vision blend)
  *   Y Button             — Zero turret (point straight ahead first)
  *
- *   D-Pad (no X held):
+ *   D-Pad (no X held) — Press to toggle RPM for each distance:
  *     Up    — Flywheel @ 1.5 m tape  (1729 RPM ★ confirmed)
  *     Right — Flywheel @ 2.0 m tape  (~1995 RPM)
  *     Down  — Flywheel @ 2.5 m tape  (2081 RPM ★ confirmed)
  *     Left  — Flywheel @ 3.0 m tape  (~2430 RPM)
- *   D-Pad (hold X):
+ *   D-Pad (hold X) — Press to toggle RPM for each distance:
  *     Up    — Flywheel @ 3.5 m tape  (~2620 RPM)
  *     Right — Flywheel @ 4.0 m tape  (2570 RPM ★ confirmed)
  *     Down  — Flywheel @ 4.5 m tape  (~2815 RPM)
  *     Left  — Flywheel @ 5.0 m tape  (interpolated)
- *   Hold D-pad to spin; release to idle flywheel.
+ *   X Button (standalone) — Toggle RPM on/off, maintaining last set distance
  * </pre>
  */
 public class RobotContainer {
@@ -99,7 +103,7 @@ public class RobotContainer {
     // ── Speed constants ───────────────────────────────────────────────────────
     private final double kMaxSpeed       = 4.5;  // m/s — normal max translation speed
     private final double kTurboSpeed     = 6.0;  // m/s — turbo max speed (right trigger)
-    private final double kMaxAngularRate = RotationsPerSecond.of(1.0).in(RadiansPerSecond); // reduced for control
+    private final double kMaxAngularRate = RotationsPerSecond.of(1.5).in(RadiansPerSecond); // 1.5 rot/s — faster peak turn
 
     // Left trigger turn sensitivity:
     //   Released (0.0) → scale = 1.0 (full turn rate)
@@ -115,7 +119,24 @@ public class RobotContainer {
     // Lower value = smoother but less responsive. Tune on carpet.
     private final SlewRateLimiter m_xLimiter   = new SlewRateLimiter(3.5);
     private final SlewRateLimiter m_yLimiter   = new SlewRateLimiter(3.5);
-    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(6.0);
+    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(12.0); // higher = snappier stop, less coast-through
+
+    // ── RPM toggle state ──────────────────────────────────────────────────────
+    // Tracks whether RPM is currently spinning (for toggle behavior)
+    // and the last distance set (for X button maintain)
+    private boolean m_rpmToggleOn = false;
+    private double  m_lastRPMDistance = ShooterConstants.PRESET_CLOSE_DIST_M;
+    
+    // Tracks which D-Pad direction was last pressed (for same-button toggle)
+    // 0 = Up, 1 = Right, 2 = Down, 3 = Left, -1 = none
+    private int m_lastDPadDirection = -1;
+
+    // Target heading for the Y-button 180° flip — captured on each press
+    private Rotation2d m_flipTarget = new Rotation2d();
+
+    // True when X was used as a D-pad modifier during the current press.
+    // Prevents the standalone X toggle from firing when X is released after a D-pad combo.
+    private boolean m_xUsedAsModifier = false;
 
     // ── Current limits applied to drive and steer motors at runtime ───────────
     private static final double kDriveStatorLimit = 60.0;
@@ -129,6 +150,12 @@ public class RobotContainer {
         .withRotationalDeadband(kMaxAngularRate * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
+    // Used by B button: full translation while heading is locked to a fixed field angle
+    private final SwerveRequest.FieldCentricFacingAngle m_facingAngle =
+        new SwerveRequest.FieldCentricFacingAngle()
+            .withDeadband(kMaxSpeed * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+
     private final SwerveRequest.SwerveDriveBrake m_brake = new SwerveRequest.SwerveDriveBrake();
     private final Telemetry m_logger = new Telemetry(kMaxSpeed);
 
@@ -138,6 +165,9 @@ public class RobotContainer {
 
     // ── Autonomous chooser ────────────────────────────────────────────────────
     private final SendableChooser<Command> m_autoChooser;
+
+    // ── Turret tracking mode chooser ─────────────────────────────────────────
+    private final SendableChooser<String> m_turretModeChooser = new SendableChooser<>();
 
     /** Field2d for PathPlanner path display in AdvantageScope. */
     private final Field2d m_pathPlannerField = new Field2d();
@@ -189,7 +219,10 @@ public class RobotContainer {
         } catch (Exception e) {
             DriverStation.reportError("AutoBuilder config failed: " + e.getMessage(), e.getStackTrace());
         }
-
+        SmartDashboard.putNumber("RawGyroYaw", 
+        drivetrain.getPigeon2().getYaw().getValueAsDouble());
+        SmartDashboard.putBoolean("GyroFault", 
+        drivetrain.getPigeon2().getFault_Hardware().getValue());
         // 4. PathPlanner → AdvantageScope logging
         SmartDashboard.putData("PathPlanner/Field", m_pathPlannerField);
 
@@ -282,6 +315,12 @@ public class RobotContainer {
         SmartDashboard.putNumber("DTHS/OptimalRPM",       ShotCalculator.OPTIMAL_SHOT.rpm());
         SmartDashboard.putNumber("DTHS/OptimalEntry_deg", ShotCalculator.OPTIMAL_SHOT.entryAngle());
 
+        // ── Turret tracking mode chooser (shown in Elastic under "Turret" tab) ──
+        m_turretModeChooser.setDefaultOption("Odometry",          "Odometry");
+        m_turretModeChooser.addOption       ("AprilTag",          "AprilTag");
+        m_turretModeChooser.addOption       ("Player Controlled", "Player");
+        SmartDashboard.putData("Turret/TrackingMode", m_turretModeChooser);
+
         configureBindings();
     }
 
@@ -324,6 +363,9 @@ public class RobotContainer {
 
     private void configureBindings() {
 
+        // Heading controller for B-button 45° lock (same kP/kD as DriveToPose theta)
+        m_facingAngle.HeadingController.setPID(5.5, 0.0, 0.25);
+
         // ── Default: field-centric teleop ─────────────────────────────────────
         drivetrain.setDefaultCommand(
             drivetrain.applyRequest(() -> {
@@ -333,7 +375,7 @@ public class RobotContainer {
                 // Get raw stick inputs
                 double rawX = -m_driverStick.getLeftY() * translationSpeed;
                 double rawY = -m_driverStick.getLeftX() * translationSpeed;
-                double rawRot = -MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15)
+                double rawRot = -MathUtil.applyDeadband(m_driverStick.getRightX(), ControlDeadbands.DRIVER_ROTATION_DEADBAND)
                     * kMaxAngularRate * turnScale;
 
                 // Apply slew rate limiting for smoother acceleration
@@ -361,9 +403,16 @@ public class RobotContainer {
             )
         );
 
-        // ── B Button: Drive to hub + shoot ───────────────────────────────────
+        // ── B Button: Hold 45° field heading while driving (bump crossing) ───
+        // Full translation is preserved — only yaw is locked to 45° field-absolute.
+        // Release to return to manual rotation control.
         m_driverStick.b().whileTrue(
-            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
+            drivetrain.applyRequest(() ->
+                m_facingAngle
+                    .withVelocityX(-m_driverStick.getLeftY() * getTranslationSpeed())
+                    .withVelocityY(-m_driverStick.getLeftX() * getTranslationSpeed())
+                    .withTargetDirection(Rotation2d.fromDegrees(45))
+            )
         );
 
         // ── Left Bumper: Gyro reset ───────────────────────────────────────────
@@ -381,8 +430,23 @@ public class RobotContainer {
             new DriveToHubAndShoot(drivetrain, shooterSubsystem)
         );
 
-        // ── Y Button: Quick-turn 45° ──────────────────────────────────────────
-        m_driverStick.y().onTrue(new TurnToAngle(drivetrain, 45, false));
+        // ── Y Button: Flip 180° relative to current heading ──────────────────
+        // Captures current heading + 180° on press, then holds that target via
+        // FieldCentricFacingAngle (full translation preserved) until within 2°.
+        m_driverStick.y().onTrue(
+            Commands.sequence(
+                Commands.runOnce(() -> m_flipTarget =
+                    drivetrain.getState().Pose.getRotation().rotateBy(Rotation2d.fromDegrees(180))),
+                drivetrain.applyRequest(() ->
+                    m_facingAngle
+                        .withVelocityX(-m_driverStick.getLeftY() * getTranslationSpeed())
+                        .withVelocityY(-m_driverStick.getLeftX() * getTranslationSpeed())
+                        .withTargetDirection(m_flipTarget)
+                ).until(() -> Math.abs(MathUtil.inputModulus(
+                    drivetrain.getState().Pose.getRotation().getDegrees() - m_flipTarget.getDegrees(),
+                    -180.0, 180.0)) < 2.0)
+            )
+        );
 
         // ── D-Pad: Precision nudge ────────────────────────────────────────────
         m_driverStick.povUp()   .whileTrue(drivetrain.applyRequest(() -> m_drive.withVelocityX( kNudgeSpeed)));
@@ -411,14 +475,15 @@ public class RobotContainer {
             Commands.sequence(
                 Commands.waitUntil(shooterSubsystem::isReadyToShoot),
                 Commands.startEnd(
-                    () -> feederSubsystem.setPower(0.55),
+                    () -> feederSubsystem.setPower(FeederConstants.FEEDER_DUTY_NORMAL),  // Safe duty cycle with margin
                     feederSubsystem::stop,
                     feederSubsystem
                 )
             )
         );
 
-        // X: hold as D-pad modifier (see D-Pad section below — no standalone action)
+        // X: reset modifier flag on press; standalone toggle fires on release (see bottom of D-Pad section)
+        m_playerStick.x().onTrue(Commands.runOnce(() -> m_xUsedAsModifier = false));
 
         // Left Trigger (operator): Climber up (hold), hold position on release
         m_playerStick.leftTrigger().whileTrue(
@@ -454,55 +519,173 @@ public class RobotContainer {
             )
         );
 
-        // ── Operator D-Pad: distance-based RPM presets (hold to spin, release to idle) ─
-        // Without X:  Up=1.5m  Right=2.0m  Down=2.5m  Left=3.0m
-        // Hold X:     Up=3.5m  Right=4.0m  Down=4.5m  Left=5.0m
+        // ── Operator D-Pad & X Button: distance-based RPM presets (toggle) ─
+        // D-Pad Without X:  Up=1.5m  Right=2.0m  Down=2.5m  Left=3.0m
+        // D-Pad Hold X:     Up=3.5m  Right=4.0m  Down=4.5m  Left=5.0m
+        // X Button (standalone): Toggles RPM on/off (maintains last set distance)
+        // Press same D-Pad direction twice to toggle on/off at that distance
         // RPM interpolated live from RPM_DISTANCE_TABLE.
-        m_playerStick.povUp().and(m_playerStick.x().negate()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_CLOSE_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povRight().and(m_playerStick.x().negate()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_2M_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povDown().and(m_playerStick.x().negate()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_MID_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povLeft().and(m_playerStick.x().negate()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_3M_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-
-        m_playerStick.povUp().and(m_playerStick.x()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_3_5M_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povRight().and(m_playerStick.x()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_FAR_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povDown().and(m_playerStick.x()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_4_5M_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-        m_playerStick.povLeft().and(m_playerStick.x()).whileTrue(
-            Commands.startEnd(
-                () -> shooterSubsystem.setFlywheelRPMFromDistance(ShooterConstants.PRESET_5M_DIST_M),
-                shooterSubsystem::idleFlywheel, shooterSubsystem));
-
-        // ── Turret: right joystick X = manual drive, Y button = zero ─────────
-        // Right joystick X on operator controller drives the turret open-loop.
-        // Use this to find your hard-stop angles — watch "Angle (deg)" in Elastic.
-        turretSubsystem.setDefaultCommand(
-            Commands.run(
-                () -> turretSubsystem.setOpenLoop(
-                    MathUtil.applyDeadband(-m_playerStick.getRightX(), 0.1) * 0.3
-                ),
-                turretSubsystem
-            )
+        
+        // D-Pad Up (1.5m or 3.5m depending on X) — toggle on same button press
+        m_playerStick.povUp().and(m_playerStick.x().negate()).onTrue(
+            Commands.runOnce(() -> {
+                if (m_lastDPadDirection == 0 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_CLOSE_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 0;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
         );
+        m_playerStick.povUp().and(m_playerStick.x()).onTrue(
+            Commands.runOnce(() -> {
+                m_xUsedAsModifier = true;
+                if (m_lastDPadDirection == 0 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_3_5M_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 0;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        
+        // D-Pad Right (2.0m or 4.0m depending on X) — toggle on same button press
+        m_playerStick.povRight().and(m_playerStick.x().negate()).onTrue(
+            Commands.runOnce(() -> {
+                if (m_lastDPadDirection == 1 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_2M_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 1;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        m_playerStick.povRight().and(m_playerStick.x()).onTrue(
+            Commands.runOnce(() -> {
+                m_xUsedAsModifier = true;
+                if (m_lastDPadDirection == 1 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_FAR_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 1;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        
+        // D-Pad Down (2.5m or 4.5m depending on X) — toggle on same button press
+        m_playerStick.povDown().and(m_playerStick.x().negate()).onTrue(
+            Commands.runOnce(() -> {
+                if (m_lastDPadDirection == 2 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_MID_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 2;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        m_playerStick.povDown().and(m_playerStick.x()).onTrue(
+            Commands.runOnce(() -> {
+                m_xUsedAsModifier = true;
+                if (m_lastDPadDirection == 2 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_4_5M_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 2;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        
+        // D-Pad Left (3.0m or 5.0m depending on X) — toggle on same button press
+        m_playerStick.povLeft().and(m_playerStick.x().negate()).onTrue(
+            Commands.runOnce(() -> {
+                if (m_lastDPadDirection == 3 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_3M_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 3;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        m_playerStick.povLeft().and(m_playerStick.x()).onTrue(
+            Commands.runOnce(() -> {
+                m_xUsedAsModifier = true;
+                if (m_lastDPadDirection == 3 && m_rpmToggleOn) {
+                    // Same button pressed twice — toggle off
+                    m_rpmToggleOn = false;
+                    shooterSubsystem.idleFlywheel();
+                    m_lastDPadDirection = -1;
+                } else {
+                    // New distance or turning back on
+                    m_lastRPMDistance = ShooterConstants.PRESET_5M_DIST_M;
+                    m_rpmToggleOn = true;
+                    m_lastDPadDirection = 3;
+                    shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                }
+            }, shooterSubsystem)
+        );
+        
+        // ── X Button (Standalone): Toggle RPM on/off (maintains last distance) ─
+        // Fires on X *release* only when X was NOT used as a D-pad modifier that press.
+        // This prevents the toggle from firing whenever X is held down as a bank-2 modifier.
+        m_playerStick.x().onFalse(
+            Commands.runOnce(() -> {
+                if (!m_xUsedAsModifier) {
+                    if (m_rpmToggleOn) {
+                        m_rpmToggleOn = false;
+                        shooterSubsystem.idleFlywheel();
+                    } else {
+                        m_rpmToggleOn = true;
+                        shooterSubsystem.setFlywheelRPMFromDistance(m_lastRPMDistance);
+                    }
+                }
+            }, shooterSubsystem)
+        );
+
+        // ── Turret: controlled by right joystick or mode-based commands ───────
+        // Default: right joystick X drives turret open-loop in "Player" mode.
+        // Other modes (Odometry, AprilTag) are toggled via right stick button.
         // Y: zero turret — point straight ahead then press this
         m_playerStick.y().onTrue(
             Commands.runOnce(turretSubsystem::zeroPosition, turretSubsystem)
@@ -513,11 +696,38 @@ public class RobotContainer {
             new SnapAimAndShootCommand(drivetrain, shooterSubsystem, turretSubsystem, feederSubsystem, visionSubsystem)
         );
 
-        // Right Stick (RS/R3): Toggle turret auto-aim
-        // Active: turret tracks velocity-compensated hub via FireControlSolver (SOTM + rotation cancel).
-        // Inactive: right joystick X manual control resumes automatically.
+        // Right Stick (RS/R3): Toggle turret auto-aim or player control based on mode selected in Elastic.
+        //   "Odometry"        — geometric aim at hub centre using Kalman-fused robot pose only.
+        //   "AprilTag"        — pure camera-yaw aim using hub AprilTag (no odometry blend).
+        //   "Player"          — right joystick X manual control.
         m_playerStick.rightStick().toggleOnTrue(
-            new TurretAutoAimCommand(drivetrain, shooterSubsystem, turretSubsystem, visionSubsystem)
+            Commands.defer(() -> {
+                String mode = m_turretModeChooser.getSelected();
+                if ("AprilTag".equals(mode)) {
+                    return new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem);
+                } else if ("Odometry".equals(mode)) {
+                    return new TurretOdometryAimCommand(drivetrain, turretSubsystem);
+                } else {
+                    // "Player" mode: manual joystick control
+                    return Commands.run(
+                        () -> turretSubsystem.setOpenLoop(
+                            MathUtil.applyDeadband(
+                                m_playerStick.getRightX(),
+                                ControlDeadbands.TURRET_STICK_DEADBAND) * 0.3),
+                        turretSubsystem);
+                }
+            }, java.util.Set.of(turretSubsystem))
+        );
+
+        // Default turret command: Player mode (manual joystick control)
+        // This only runs when no other command has the turret requirement
+        turretSubsystem.setDefaultCommand(
+            Commands.run(
+                () -> turretSubsystem.setOpenLoop(
+                    MathUtil.applyDeadband(m_playerStick.getRightX(), ControlDeadbands.TURRET_STICK_DEADBAND) * 0.3
+                ),
+                turretSubsystem
+            )
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────
@@ -534,11 +744,11 @@ public class RobotContainer {
      * The flywheel keeps spinning after this command; follow with "IdleFlywheel" when done.
      */
     private Command makeShootCommand(double targetRpm, int balls) {
-        double feedSeconds = balls * 0.25 + 0.5;
+        double feedSeconds = balls * 0.22 + 0.45;  // Balanced: 0.22s per ball
         return Commands.sequence(
             Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(targetRpm), shooterSubsystem),
             Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(targetRpm)).withTimeout(2.0),
-            Commands.runOnce(() -> feederSubsystem.setPower(0.55), feederSubsystem),
+            Commands.runOnce(() -> feederSubsystem.setPower(FeederConstants.FEEDER_DUTY_NORMAL), feederSubsystem),  // Safe duty cycle
             Commands.waitSeconds(feedSeconds),
             Commands.runOnce(feederSubsystem::stop, feederSubsystem)
         );

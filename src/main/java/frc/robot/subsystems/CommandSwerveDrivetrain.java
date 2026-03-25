@@ -232,14 +232,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // PathPlanner auto will override this immediately with resetPose(), so
         // auto start poses are unaffected.
         if (m_wasDisabled && !isDisabled) {
-            DriverStation.getAlliance().ifPresent(allianceColor -> {
-                Rotation2d expectedHeading = allianceColor == Alliance.Red
-                    ? kRedAlliancePerspectiveRotation
-                    : kBlueAlliancePerspectiveRotation;
-                Pose2d current = getState().Pose;
-                resetPose(new Pose2d(current.getTranslation(), expectedHeading));
-                seedFieldCentric();
-            });
+        // Only snap heading if we have no valid starting pose yet
+            // (PathPlanner will call resetPose() immediately in auto, overriding this)
+        DriverStation.getAlliance().ifPresent(allianceColor -> {
+            Rotation2d expectedHeading = allianceColor == Alliance.Red
+                ? kRedAlliancePerspectiveRotation
+                : kBlueAlliancePerspectiveRotation;
+            Pose2d current = getState().Pose;
+            resetPose(new Pose2d(current.getTranslation(), expectedHeading));
+            // Remove seedFieldCentric() — let the gyro track freely from here
+         });
         }
         m_wasDisabled = isDisabled;
 

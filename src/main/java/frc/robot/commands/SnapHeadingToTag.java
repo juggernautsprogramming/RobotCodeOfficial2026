@@ -153,11 +153,7 @@ public class SnapHeadingToTag extends Command {
             if (targetId == m_lockedTagId) {
                 // Hub tags → aim at hub center for a clean shot angle.
                 // Any other tag → aim at the tag's field position.
-                boolean isHubTag = false;
-                for (int id : ShooterConstants.HUB_APRIL_TAG_IDS) {
-                    if (targetId == id) { isHubTag = true; break; }
-                }
-                Translation2d aimPoint = isHubTag
+                Translation2d aimPoint = VisionSubsystem.isHubTag(targetId)
                     ? ShooterConstants.HUB_CENTER
                     : VisionConstants.kTagLayout.getTagPose(targetId)
                         .map(p -> p.toPose2d().getTranslation())

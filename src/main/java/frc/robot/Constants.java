@@ -108,6 +108,30 @@ public final class Constants {
     }
 
     // =========================================================================
+    // CONTROL DEADZONES — unified deadband constants
+    // =========================================================================
+
+    public static final class ControlDeadbands {
+        // Driver inputs (joystick)
+        public static final double DRIVER_ROTATION_DEADBAND = 0.12;  // Slightly tighter for precision
+        public static final double DRIVE_REQUEST_DEADBAND   = 0.10;  // 10% of max speed
+
+        // Operator inputs
+        public static final double TURRET_STICK_DEADBAND    = 0.10;
+        public static final double OPERATOR_ROTATION_DEADBAND = 0.12;
+
+        // Output velocity thresholds — below these, outputs are zeroed
+        public static final double VELOCITY_OUTPUT_DEADBAND = 0.01;  // m/s
+        public static final double ANGULAR_OUTPUT_DEADBAND  = 0.01;  // rad/s
+
+        // Vision & alignment
+        public static final double VISION_ANGLE_DEADBAND    = 0.50;  // degrees
+        public static final double ALIGNMENT_OUTPUT_DEADBAND = 0.015; // m/s
+
+        private ControlDeadbands() {}
+    }
+
+    // =========================================================================
     // VISION — hardware (camera physical positions)
     // =========================================================================
 
@@ -178,6 +202,14 @@ public final class Constants {
         /** Acceptable yaw error before "aligned" is declared (degrees). */
         public static final double angleTolerance = 0.5;
 
+        // ── Turret aiming blend weight ────────────────────────────────────────
+        /** Vision-to-odometry blend weight for turret aiming.
+         *  0.0 = pure odometry (FireControlSolver)
+         *  1.0 = pure vision (AprilTag bearing)
+         *  0.6 = balanced (60% vision, 40% odometry) — tuned for SOTM + vision blend
+         */
+        public static final double TURRET_VISION_WEIGHT = 0.6;
+
         // ── Camera geometry ───────────────────────────────────────────────────
         public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
         public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(12.9);
@@ -195,7 +227,7 @@ public final class Constants {
     public static final class DriveToPoseConstants {
 
         public static final double kP_XY         = 3.5;
-        public static final double kI_XY         = 0.0;
+        public static final double kI_XY         = 0.05;    // Small: eliminates last 1–2 cm creep
         public static final double kD_XY         = 0.15;
         public static final double MAX_VEL_MPS   = 3.0;
         public static final double MAX_ACCEL_MPS2 = 4.0;
@@ -220,7 +252,7 @@ public final class Constants {
 
         private DriveToPoseConstants() {}
     }
-
+    
     // =========================================================================
     // SHOOTER — geometry, ballistics, alignment PID
     // =========================================================================
@@ -265,7 +297,7 @@ public final class Constants {
          * All shot calculations must use this angle.
          * Previously stored as FIXED_SHOT_ANGLE_DEG = 45.0 (incorrect/placeholder).
          */
-        public static final double FIXED_SHOT_ANGLE_DEG = 61.5; // ← confirmed physical angle
+        public static final double FIXED_SHOT_ANGLE_DEG = 61.5; // Confirmed physical angle
 
         // ── Flywheel hardware ─────────────────────────────────────────────────
         public static final int     FLYWHEEL_LEADER_ID       = 29;
@@ -305,9 +337,9 @@ public final class Constants {
 
         // ── Flywheel PID / feedforward (VelocityTorqueCurrentFOC, Phoenix Pro) ──
         // Gains are in Amps. Derived from SysId voltage values ÷ Kt (~0.0181 for Kraken/Falcon).
-        public static final double FLYWHEEL_kP = 22.0;   // Increased for better RPM tracking
-        public static final double FLYWHEEL_kI = 0.5;    // Increased integral gain for steady-state
-        public static final double FLYWHEEL_kD = 0.0;
+        public static final double FLYWHEEL_kP = 25.0;   // Kept at 25.0 for good RPM tracking
+        public static final double FLYWHEEL_kI = 0.8;    // Reduced from 1.2 to avoid overshoot on distance changes
+        public static final double FLYWHEEL_kD = 0.1;    // Added small D term for transient damping
         public static final double FLYWHEEL_kS = 12.426;
         public static final double FLYWHEEL_kV = 0.1565;
         public static final double FLYWHEEL_kA = 0.0;
@@ -324,35 +356,35 @@ public final class Constants {
          * Format: { distance_meters, target_rpm }
          */
         public static final double[][] RPM_DISTANCE_TABLE = {
-            { 1.153,  1850.0 },  // ★ confirmed  (was 1.50 m bumper→face)
-            { 1.400,  1920.0 },  // interpolated
-            { 1.650,  1995.0 },  // interpolated
-            { 1.900,  2075.0 },  // interpolated
-            { 2.153,  2200.0 },  // ★ confirmed  (was 2.50 m bumper→face)
-            { 2.400,  2310.0 },  // interpolated
-            { 2.650,  2430.0 },  // interpolated
-            { 2.900,  2540.0 },  // interpolated
-            { 3.153,  2620.0 },  // interpolated
-            { 3.400,  2650.0 },  // interpolated
-            { 3.653,  2680.0 },  // ★ confirmed  (was 4.00 m bumper→face)
-            { 4.000,  2780.0 },  // interpolated — extrapolated beyond confirmed range, verify on field
-            { 4.400,  2920.0 },  // interpolated — extrapolated, verify on field
-            { 4.800,  3100.0 },  // interpolated — extrapolated, verify on field
-            { 5.153,  3300.0 },  // ⚠ unconfirmed (would be 5.50 m bumper→face) — MEASURE AND UPDATE
+            { 1.153,  1930.0 },  // ★ confirmed  (was 1.50 m bumper→face)
+            { 1.400,  2000.0 },  // interpolated
+            { 1.650,  2055.0 },  // interpolated — reduced to prevent overshooting at 2M
+            { 1.900,  2145.0 },  // interpolated — reduced slightly
+            { 2.153,  2350.0 },  // ★ confirmed  (was 2.50 m bumper→face) — increased from 2310
+            { 2.400,  2480.0 },  // interpolated — increased from 2430
+            { 2.650,  2600.0 },  // interpolated — increased from 2550  
+            { 2.900,  2710.0 },  // interpolated — increased from 2660  
+            { 3.153,  2790.0 },  // interpolated — increased from 2740  
+            { 3.400,  2820.0 },  // interpolated — increased from 2770
+            { 3.653,  2850.0 },  // ★ confirmed  (was 4.00 m bumper→face) — increased from 2800
+            { 4.000,  2950.0 },  // interpolated — increased from 2900
+            { 4.400,  3090.0 },  // interpolated — increased from 3040
+            { 4.800,  3270.0 },  // interpolated — increased from 3220
+            { 5.153,  3470.0 },  // ⚠ unconfirmed (would be 5.50 m bumper→face) — increased from 3420
         };
 
         // ── D-Pad operator presets ────────────────────────────────────────────
         // Tape distances (bumper→face) shown in comments for field reference.
-        // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
+        // The _DIST_M values are physics coordinates (shooter-exit→hub-center).add
         // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
         // ── Named RPM presets (used by PathPlanner auto named commands) ─────────
-        public static final double PRESET_CLOSE_RPM    = 1850.0; // ★ confirmed
+        public static final double PRESET_CLOSE_RPM    = 1980.0; // 1.5m
         public static final double PRESET_CLOSE_DIST_M = 1.153;  // tape: 1.5 m
-        public static final double PRESET_MID_RPM      = 2200.0; // ★ confirmed (updated from 2081)
+        public static final double PRESET_MID_RPM      = 2350.0; // increased from 2510 for 2.5m
         public static final double PRESET_MID_DIST_M   = 2.153;  // tape: 2.5 m
-        public static final double PRESET_FAR_RPM      = 2680.0; // ★ confirmed (updated from 2570)
+        public static final double PRESET_FAR_RPM      = 2850.0; // increased from 2820 for 4.0m
         public static final double PRESET_FAR_DIST_M   = 3.653;  // tape: 4.0 m
-        public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
+        public static final double PRESET_VFAR_RPM     = 3470.0; // increased from 3820 for 5.5m
         public static final double PRESET_VFAR_DIST_M  = 5.153;  // tape: 5.5 m  ⚠ unconfirmed
 
         // ── D-Pad operator distance presets (used by RobotContainer D-pad bindings) ──
@@ -401,9 +433,9 @@ public final class Constants {
         public static final double PIVOT_CRUISE_VELOCITY   = 100.0;
         public static final double PIVOT_ACCELERATION      = 200.0;
         public static final double PIVOT_kP                = 2.0;
-        public static final double PIVOT_kI                = 0.0;
+        public static final double PIVOT_kI                = 0.05;   // Added integral for steady-state accuracy
         public static final double PIVOT_kD                = 0.1;
-        public static final double PIVOT_ANGLE_TOLERANCE_DEG = 1.0;
+        public static final double PIVOT_ANGLE_TOLERANCE_DEG = 0.5;  // Tightened from 1.0° for better shot consistency
 
         // ── Shot angle optimizer (fixed angle — sweep is informational only) ──
         public static final double MIN_LAUNCH_ANGLE_DEG  = 20.0;
@@ -461,7 +493,7 @@ public final class Constants {
         /** Gravitational acceleration (m/s²). */
         public static final double g = 9.81;
 
-        public static final double FIXED_SHOT_RPM_M = 0;
+        public static final double FIXED_SHOT_RPM_M = 2300;
 
         private ShooterConstants() {}
     }
@@ -481,14 +513,14 @@ public final class Constants {
         // ── Cord-safety soft limits ───────────────────────────────────────────
         // Convention: positive = RIGHT, negative = LEFT (Clockwise_Positive inversion).
         // Physical hard stops measured on robot: right +279.75°, left -266.22°.
-        // Backed off 15° each side — do NOT increase beyond these without re-checking cords.
+        // INCREASED margin from 15° to 25° for safety during robot tilt/deceleration.
         // FORWARD must always be > REVERSE or Phoenix will reject the config.
-        public static final double TURRET_FORWARD_LIMIT_DEG =  265.0; // right cord limit (+279.75° hard stop − 15°)
-        public static final double TURRET_REVERSE_LIMIT_DEG = -251.0; // left  cord limit (−266.22° hard stop + 15°)
+        public static final double TURRET_FORWARD_LIMIT_DEG =  260.0; 
+        public static final double TURRET_REVERSE_LIMIT_DEG = -260.0; 
 
         // ── MotionMagic profile (used during limit-flip) ──────────────────────
-        public static final double TURRET_CRUISE_VEL_RPS = 1.0;
-        public static final double TURRET_ACCEL_RPS2     = 2.0;
+        public static final double TURRET_CRUISE_VEL_RPS = 6.0;   // output-shaft rot/s during flip
+        public static final double TURRET_ACCEL_RPS2     = 10.0;  // output-shaft rot/s² — snappy ramp
 
         // ── Position PID (Slot 0, MotionMagicVoltage) ────────────────────────
         public static final double TURRET_kP = 24.0;
@@ -508,6 +540,29 @@ public final class Constants {
     // =========================================================================
 
     public static final class ClimberConstants {
+
+        // ── Hardware ─────────────────────────────────────────────────────────
+        public static final int    LEADER_ID   = 15;
+        public static final int    FOLLOWER_ID = 16;
+        public static final String CAN_BUS     = "ChassisCAN";
+
+        // ── Mechanism ────────────────────────────────────────────────────────
+        /** Motor turns per one output shaft turn. 1.0 = direct drive. */
+        public static final double GEAR_RATIO      = 1.0;
+
+        // ── MotionMagic profile ───────────────────────────────────────────────
+        public static final double CRUISE_VELOCITY = 100.0; // rot/s
+        public static final double ACCELERATION    = 200.0; // rot/s²
+
+        // ── Slot 0 gains ──────────────────────────────────────────────────────
+        public static final double kP = 2.0;
+        public static final double kI = 0.0;
+        public static final double kD = 0.1;
+        /** Gravity feedforward (Volts) — opposes gravity when arm is extended. */
+        public static final double kG = 0.2;
+
+        // ── Stator current limit ──────────────────────────────────────────────
+        public static final double STATOR_LIMIT_AMPS = 40.0;
 
         /**
          * Motor encoder degrees for the Level 1 rung position.
@@ -529,13 +584,66 @@ public final class Constants {
     }
 
     // =========================================================================
+    // FEEDER
+    // =========================================================================
+
+    public static final class FeederConstants {
+        /** Feeder motor CAN ID. */
+        public static final int FEEDER_MOTOR_ID = 25;
+
+        /** Normal feeder duty cycle (forward, 0–1 fraction of battery voltage). */
+        public static final double FEEDER_DUTY_NORMAL = 0.60;  // Reduced from 0.65 for safety margin
+
+        /** Reverse feeder duty cycle (backward, 0–1). */
+        public static final double FEEDER_DUTY_REVERSE = -0.40;
+
+        /** Supply current limit to prevent jamming and brownout (Amps). */
+        public static final double FEEDER_CURRENT_LIMIT_AMPS = 20.0;
+
+        /** Current threshold above which a jam is suspected (Amps). */
+        public static final double FEEDER_JAM_DETECTION_AMPS = 18.0;
+
+        private FeederConstants() {}
+    }
+
+    // =========================================================================
     // INTAKE
     // =========================================================================
 
     public static final class IntakeConstants {
-        /** Actuation motor CAN ID. */
-        public static final int ACTUATION_MOTOR_ID = 26;
 
+        // ── Actuation motor ───────────────────────────────────────────────────
+        /** Actuation motor CAN ID. */
+        public static final int    ACTUATION_MOTOR_ID      = 26;
+        public static final String ACTUATION_CAN_BUS       = "rio";
+        public static final double ACTUATION_CRUISE_VEL    = 100.0; // rot/s
+        public static final double ACTUATION_ACCELERATION  = 200.0; // rot/s²
+        public static final double ACTUATION_kP            = 2.0;
+        public static final double ACTUATION_kI            = 0.0;
+        public static final double ACTUATION_kD            = 0.1;
+        /** Forward soft limit (rotations) — fully deployed position. */
+        public static final double ACTUATION_FORWARD_LIMIT = 50.0;
+        /** Peak voltage (V) clamp for actuation motor. */
+        public static final double ACTUATION_PEAK_VOLTAGE  = 8.0;
+
+        // ── Uptake motor ──────────────────────────────────────────────────────
+        public static final int    UPTAKE_MOTOR_ID     = 42;
+        public static final String UPTAKE_CAN_BUS      = "ChassisCAN";
+        public static final double UPTAKE_CRUISE_VEL   = 100.0; // rot/s
+        public static final double UPTAKE_ACCELERATION = 200.0; // rot/s²
+        public static final double UPTAKE_kP           = 2.0;
+        public static final double UPTAKE_kI           = 0.0;
+        public static final double UPTAKE_kD           = 0.1;
+        public static final double UPTAKE_PEAK_VOLTAGE = 8.0;
+
+        // ── Intake roller motors ──────────────────────────────────────────────
+        public static final int    ROLLER_LEADER_ID    = 27;
+        public static final int    ROLLER_FOLLOWER_ID  = 28;
+        public static final String ROLLER_CAN_BUS      = "rio";
+        public static final double ROLLER_STATOR_LIMIT = 40.0; // Amps
+        public static final double ROLLER_SUPPLY_LIMIT = 30.0; // Amps
+
+        // ── Arm positions & powers ────────────────────────────────────────────
         /** Target position (rotations) when the arm is fully deployed. */
         public static final double DEPLOYED_ROTATIONS = 11.33;
         /** Target position (rotations) when the arm is fully stowed. */

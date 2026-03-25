@@ -92,10 +92,10 @@ public class AutonomousFactory {
         NamedCommands.registerCommand("SpinUpFlywheel", new InstantCommand(() -> {
             m_shooter.setFlywheelRPM(optRPM);
             m_shooter.setLaunchAngleDeg(optHoodDeg);
-        }));
+        }, m_shooter));
 
         NamedCommands.registerCommand("IdleFlywheel",
-            new InstantCommand(m_shooter::idleFlywheel));
+            new InstantCommand(m_shooter::idleFlywheel, m_shooter));
 
         NamedCommands.registerCommand("ShootPreloads",
             new ShootNBallsCommand(m_shooter, AutoStartConstants.PRELOAD_BALL_COUNT, optRPM));

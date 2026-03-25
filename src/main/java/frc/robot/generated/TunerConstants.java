@@ -75,7 +75,7 @@ public class TunerConstants {
     )
     .withClosedLoopGeneral(
         new ClosedLoopGeneralConfigs()
-            .withContinuousWrap(true)  // ← THIS is the fix
+            .withContinuousWrap(true)
     );
     private static final CANcoderConfiguration encoderInitialConfigs = new CANcoderConfiguration();
     // Configs for the Pigeon 2; leave this null to skip applying Pigeon 2 configs
@@ -100,7 +100,7 @@ public class TunerConstants {
     private static final boolean kInvertLeftSide = false;
     private static final boolean kInvertRightSide = true;
 
-    private static final int kPigeonId = 0;
+    private static final int kPigeonId = 40;
 
     // These are only used for simulation
     private static final MomentOfInertia kSteerInertia = KilogramSquareMeters.of(0.01);

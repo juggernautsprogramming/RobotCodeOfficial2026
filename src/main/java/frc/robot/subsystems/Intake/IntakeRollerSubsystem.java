@@ -1,38 +1,33 @@
 package frc.robot.subsystems.Intake;
 
+import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants.IntakeConstants;
 
 /**
- * IntakeRollerSubsystem — drives the two intake bar/rod motors (IDs 27 and 28).
+ * IntakeRollerSubsystem — drives the two intake bar/rod motors.
  *
- * Motor 27 is the leader; motor 28 follows in the opposite direction
- * (they spin toward each other to pull game pieces in).
+ * Motor ROLLER_LEADER_ID is the leader; ROLLER_FOLLOWER_ID follows in the
+ * opposite direction (they spin toward each other to pull game pieces in).
  * Flip kFollowerInverted if your mechanism spins the wrong way.
  */
 public class IntakeRollerSubsystem extends SubsystemBase {
-
-    // ── Hardware IDs ──────────────────────────────────────────────────────────
-    private static final int    kLeaderID        = 27;
-    private static final int    kFollowerID      = 28;
-    private static final String kCANBus          = "rio"; // change if on RIO bus
 
     // ── Inversion — flip kFollowerInverted if rollers fight each other ────────
     private static final boolean kLeaderInverted   = false;
     private static final boolean kFollowerInverted = true;  // opposite of leader
 
-    // ── Current limits ────────────────────────────────────────────────────────
-    private static final double kStatorLimit = 40.0; // Amps
-    private static final double kSupplyLimit = 30.0; // Amps
-
     // ── Hardware ──────────────────────────────────────────────────────────────
-    private final TalonFX m_leader   = new TalonFX(kLeaderID,   kCANBus);
-    private final TalonFX m_follower = new TalonFX(kFollowerID, kCANBus);
+    private final CANBus   m_bus      = new CANBus(IntakeConstants.ROLLER_CAN_BUS);
+    private final TalonFX  m_leader   = new TalonFX(IntakeConstants.ROLLER_LEADER_ID,   m_bus);
+    private final TalonFX  m_follower = new TalonFX(IntakeConstants.ROLLER_FOLLOWER_ID, m_bus);
 
     // ── Control request (reused to avoid allocation) ──────────────────────────
     private final DutyCycleOut m_request = new DutyCycleOut(0.0);
@@ -42,23 +37,21 @@ public class IntakeRollerSubsystem extends SubsystemBase {
 
         cfg.MotorOutput.NeutralMode = NeutralModeValue.Coast;
         cfg.CurrentLimits = new CurrentLimitsConfigs()
-            .withStatorCurrentLimit(kStatorLimit)
+            .withStatorCurrentLimit(IntakeConstants.ROLLER_STATOR_LIMIT)
             .withStatorCurrentLimitEnable(true)
-            .withSupplyCurrentLimit(kSupplyLimit)
+            .withSupplyCurrentLimit(IntakeConstants.ROLLER_SUPPLY_LIMIT)
             .withSupplyCurrentLimitEnable(true);
 
         // Apply to leader
-        cfg.MotorOutput.Inverted =
-            kLeaderInverted
-                ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
-                : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        cfg.MotorOutput.Inverted = kLeaderInverted
+            ? InvertedValue.Clockwise_Positive
+            : InvertedValue.CounterClockwise_Positive;
         m_leader.getConfigurator().apply(cfg);
 
         // Apply to follower (inverted relative to leader)
-        cfg.MotorOutput.Inverted =
-            kFollowerInverted
-                ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
-                : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        cfg.MotorOutput.Inverted = kFollowerInverted
+            ? InvertedValue.Clockwise_Positive
+            : InvertedValue.CounterClockwise_Positive;
         m_follower.getConfigurator().apply(cfg);
     }
 

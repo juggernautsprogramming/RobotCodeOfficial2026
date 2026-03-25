@@ -308,7 +308,10 @@ public class FireControlSolver {
                 projDist = Math.hypot(prx, pry);
 
                 if (projDist < 0.01) {
-                    tof = effectiveTOF(distance);
+                    // Degenerate: velocity nearly cancels displacement.
+                    // Reset projDist so RPM lookup uses the same distance as the TOF fallback.
+                    projDist       = distance;
+                    tof            = effectiveTOF(distance);
                     iterationsUsed = maxIter + 1;
                     break;
                 }

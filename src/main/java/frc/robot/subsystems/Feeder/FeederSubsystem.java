@@ -62,7 +62,4 @@ public class FeederSubsystem extends SubsystemBase {
     }
 
     public void stop() { feederMotor.stopMotor(); }
-
-    @Override
-    public void periodic() {}
 }

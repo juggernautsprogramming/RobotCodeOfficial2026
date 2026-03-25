@@ -183,11 +183,6 @@ public class ShooterSubsystem extends SubsystemBase {
         m_flywheelFollower.stopMotor();
     }
 
-    public void shoot() {
-        setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M);
-        m_isShooting = true;
-    }
-
     public boolean isAtTargetRPM(double targetRPM) {
         return Math.abs(getCurrentRPM() - targetRPM) < 100.0;
     }
@@ -225,7 +220,10 @@ public class ShooterSubsystem extends SubsystemBase {
         return (m_pivotLeader.getPosition().getValueAsDouble()
             / ShooterConstants.PIVOT_GEAR_RATIO) * 360.0;
     }
-
+    public void shoot() {
+        setFlywheelRPM(ShooterConstants.FIXED_SHOT_RPM_M);
+        m_isShooting = true;
+    }
     // ── SysId command factories ────────────────────────────────────────────────
     // Wire these up in RobotContainer to joystick buttons for characterization.
     // Run quasistatic forward, quasistatic reverse, dynamic forward, dynamic reverse

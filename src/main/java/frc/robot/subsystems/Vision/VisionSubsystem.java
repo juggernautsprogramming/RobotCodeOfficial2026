@@ -619,7 +619,7 @@ public class VisionSubsystem extends SubsystemBase {
             && y >= -FIELD_MARGIN_M && y <= FIELD_WIDTH_M  + FIELD_MARGIN_M;
     }
 
-    private static boolean isHubTag(int id) {
+    public static boolean isHubTag(int id) {
         for (int hubId : ShooterConstants.HUB_APRIL_TAG_IDS) {
             if (id == hubId) return true;
         }

@@ -10,6 +10,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.TurretConstants;
 
@@ -20,17 +21,18 @@ import frc.robot.Constants.TurretConstants;
  * ──────────
  *   0°   = straight ahead.  Positive = RIGHT.  Negative = LEFT.
  *   Hard stops: right +279.75°, left −266.22°.
- *   Soft limits: right +265°, left −251° (15° safety margin each side).
+ *   Soft limits: right +260°, left −260° (safety margin each side).
  *
- * Zeroing
- * ───────
- *   Point the turret straight ahead, then press the operator Y button.
+ * Zeroing (REQUIRED before every match)
+ * ──────────────────────────────────────
+ *   1. Point the turret straight ahead physically.
+ *   2. Press operator Y button to call zeroPosition().
+ *   3. Confirm "Zeroed" indicator in Elastic turns green before enabling auto-aim.
  *
  * Limit-flip behaviour
  * ────────────────────
  *   When the turret is driven into a cord-safety limit while the joystick is
  *   still held, it automatically races to the OPPOSITE limit via MotionMagic.
- *   The flip completes as long as the joystick stays held; release to cancel.
  */
 public class TurretSubsystem extends SubsystemBase {
 
@@ -41,6 +43,12 @@ public class TurretSubsystem extends SubsystemBase {
     private double  m_targetDeg  = 0.0;
     private boolean m_isFlipped  = false;
     private boolean m_isFlipping = false;
+
+    /**
+     * True once the operator has pressed Y to zero the turret this session.
+     * Odometry aim should not be used until this is true.
+     */
+    private boolean m_hasBeenZeroed = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -58,14 +66,13 @@ public class TurretSubsystem extends SubsystemBase {
         cfg.MotorOutput.NeutralMode = NeutralModeValue.Brake;
         cfg.MotorOutput.Inverted    = InvertedValue.Clockwise_Positive; // right = positive
 
-        // SensorToMechanismRatio: getPosition() returns turret rotations, not motor rotations.
-        cfg.Feedback.SensorToMechanismRatio = TurretConstants.TURRET_GEAR_RATIO;
+        // SensorToMechanismRatio: getPosition() returns turret output-shaft rotations.
+        cfg.Feedback.SensorToMechanismRatio = TurretConstants.TURRET_GEAR_RATIO; // 20.0
 
         cfg.CurrentLimits.StatorCurrentLimit       = TurretConstants.TURRET_STATOR_LIMIT_AMPS;
         cfg.CurrentLimits.StatorCurrentLimitEnable = true;
 
-        // Cord-safety soft limits in turret rotations (degrees ÷ 360).
-        // FORWARD must be > REVERSE or Phoenix rejects the config.
+        // Soft limits in turret output-shaft rotations (degrees ÷ 360).
         cfg.SoftwareLimitSwitch.ForwardSoftLimitEnable    = true;
         cfg.SoftwareLimitSwitch.ForwardSoftLimitThreshold = TurretConstants.TURRET_FORWARD_LIMIT_DEG / 360.0;
         cfg.SoftwareLimitSwitch.ReverseSoftLimitEnable    = true;
@@ -82,42 +89,55 @@ public class TurretSubsystem extends SubsystemBase {
 
         applyWithRetry(cfg);
 
+        // Zero encoder at boot. Operator MUST press Y to rezero if turret
+        // is not physically pointing straight ahead at power-on.
         m_motor.setPosition(0.0);
     }
 
-    // ── Elastic layout ────────────────────────────────────────────────────────
+    // ── Elastic / SmartDashboard layout ──────────────────────────────────────
 
     private void setupElastic() {
         ShuffleboardTab tab = Shuffleboard.getTab("Turret");
 
-        tab.addNumber ("Angle (deg)",          this::getAngleDeg)       .withPosition(0, 0).withSize(2, 2);
-        tab.addNumber ("Target (deg)",         () -> m_targetDeg)        .withPosition(0, 2).withSize(2, 1);
-        tab.addNumber ("Error (deg)",          () -> m_targetDeg - getAngleDeg()).withPosition(0, 3).withSize(2, 1);
-        tab.addBoolean("At Target",            this::isAtTarget)         .withPosition(2, 0).withSize(2, 1);
-        tab.addBoolean("At Forward Limit",     this::isAtForwardLimit)   .withPosition(2, 1).withSize(2, 1);
-        tab.addBoolean("At Reverse Limit",     this::isAtReverseLimit)   .withPosition(2, 2).withSize(2, 1);
-        tab.addBoolean("Flipped to Other Side",() -> m_isFlipped)        .withPosition(2, 3).withSize(2, 1);
-        tab.addNumber ("Motor Output %",       () -> m_motor.getDutyCycle().getValueAsDouble() * 100.0).withPosition(4, 0).withSize(2, 1);
-        tab.addNumber ("Stator Current (A)",   () -> m_motor.getStatorCurrent().getValueAsDouble())    .withPosition(4, 1).withSize(2, 1);
+        tab.addNumber ("Angle (deg)",           this::getAngleDeg)                                        .withPosition(0, 0).withSize(2, 2);
+        tab.addNumber ("Target (deg)",          () -> m_targetDeg)                                        .withPosition(0, 2).withSize(2, 1);
+        tab.addNumber ("Error (deg)",           () -> m_targetDeg - getAngleDeg())                        .withPosition(0, 3).withSize(2, 1);
+        tab.addBoolean("At Target",             this::isAtTarget)                                         .withPosition(2, 0).withSize(2, 1);
+        tab.addBoolean("At Forward Limit",      this::isAtForwardLimit)                                   .withPosition(2, 1).withSize(2, 1);
+        tab.addBoolean("At Reverse Limit",      this::isAtReverseLimit)                                   .withPosition(2, 2).withSize(2, 1);
+        tab.addBoolean("Flipped to Other Side", () -> m_isFlipped)                                        .withPosition(2, 3).withSize(2, 1);
+        tab.addBoolean("Zeroed",                () -> m_hasBeenZeroed)                                    .withPosition(4, 0).withSize(2, 1);
+        tab.addNumber ("Motor Output %",        () -> m_motor.getDutyCycle().getValueAsDouble() * 100.0)  .withPosition(4, 1).withSize(2, 1);
+        tab.addNumber ("Stator Current (A)",    () -> m_motor.getStatorCurrent().getValueAsDouble())      .withPosition(4, 2).withSize(2, 1);
+    }
+
+    // ── Periodic ─────────────────────────────────────────────────────────────
+
+    @Override
+    public void periodic() {
+        SmartDashboard.putBoolean("Turret/Zeroed",            m_hasBeenZeroed);
+        SmartDashboard.putBoolean("Turret/WARNING_NotZeroed", !m_hasBeenZeroed);
+        SmartDashboard.putNumber ("Turret/AngleDeg",          getAngleDeg());
+        SmartDashboard.putNumber ("Turret/TargetDeg",         m_targetDeg);
+        SmartDashboard.putBoolean("Turret/AtTarget",          isAtTarget());
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Commands the turret to an angle (degrees). 0 = straight ahead,
-     * positive = right, negative = left.
+     * Commands the turret to an angle (degrees, robot-frame).
      * Requests past a cord-safety limit flip to the opposite limit instead.
      */
     public void setAngleDeg(double degrees) {
         double command;
         if (degrees > TurretConstants.TURRET_FORWARD_LIMIT_DEG) {
-            command    = TurretConstants.TURRET_REVERSE_LIMIT_DEG;
+            command     = TurretConstants.TURRET_REVERSE_LIMIT_DEG;
             m_isFlipped = true;
         } else if (degrees < TurretConstants.TURRET_REVERSE_LIMIT_DEG) {
-            command    = TurretConstants.TURRET_FORWARD_LIMIT_DEG;
+            command     = TurretConstants.TURRET_FORWARD_LIMIT_DEG;
             m_isFlipped = true;
         } else {
-            command    = degrees;
+            command     = degrees;
             m_isFlipped = false;
         }
         m_targetDeg = command;
@@ -125,16 +145,16 @@ public class TurretSubsystem extends SubsystemBase {
     }
 
     /**
-     * Commands the turret to a robot-frame angle with an angular velocity feedforward.
-     * Use this for auto-aim where robot rotation must be cancelled in real time.
+     * Commands the turret to a robot-frame angle with angular velocity feedforward.
      *
-     * <p>The feedforward is converted to volts via {@code kV} (V·s/rot). With the default
-     * {@code TURRET_kV = 0.0} the position loop runs alone; tune kV on the field to make
-     * the turret lead during fast robot rotation.
+     * <p>Pass the robot's raw angular velocity (rad/s, positive = CCW).
+     * This method negates it internally so the turret counter-rotates to stay
+     * locked on the hub. Do NOT pre-negate the value at the call site.
      *
-     * @param degrees      Target turret angle, robot-frame. 0 = straight ahead, + = right.
-     * @param ffRadPerSec  Feedforward angular velocity (rad/s). Positive = clockwise.
-     *                     Pass 0.0 for pure position control.
+     * <p>FF is zero until TURRET_kV is tuned on the field.
+     *
+     * @param degrees     Target angle (robot-frame). 0 = forward, + = right.
+     * @param ffRadPerSec Robot angular velocity rad/s, positive = CCW. NOT pre-negated.
      */
     public void setAngleDegWithFF(double degrees, double ffRadPerSec) {
         double command;
@@ -149,22 +169,21 @@ public class TurretSubsystem extends SubsystemBase {
             m_isFlipped = false;
         }
         m_targetDeg = command;
-        // ffRps: desired turret output-shaft velocity in rot/s
-        // ffVoltage: additional voltage bias (kV * ffRps). Zero until TURRET_kV is tuned.
-        double ffRps     = ffRadPerSec / (2.0 * Math.PI);
+
+        // Negate here — ONE place only. Turret must rotate opposite to robot.
+        // ffVoltage is zero until TURRET_kV is tuned.
+        double ffRps     = -ffRadPerSec / (2.0 * Math.PI);
         double ffVoltage = ffRps * TurretConstants.TURRET_kV;
         m_motor.setControl(m_mmRequest.withPosition(command / 360.0).withFeedForward(ffVoltage));
     }
 
     /**
      * Open-loop drive. power [-1, 1]: positive = right, negative = left.
-     * Hitting a cord-safety limit while still driving into it triggers a
-     * full-speed MotionMagic flip to the opposite limit.
+     * Driving into a limit triggers a MotionMagic flip to the opposite limit.
      */
     public void setOpenLoop(double power) {
         double angle = getAngleDeg();
 
-        // Hold the flip until the turret arrives (within 5°) or the stick is released
         if (m_isFlipping) {
             if (Math.abs(angle - m_targetDeg) < 5.0 || Math.abs(power) < 0.05) {
                 m_isFlipping = false;
@@ -175,7 +194,6 @@ public class TurretSubsystem extends SubsystemBase {
             }
         }
 
-        // Trigger a flip when driving into a limit
         if (power > 0 && angle >= TurretConstants.TURRET_FORWARD_LIMIT_DEG - TurretConstants.TURRET_ANGLE_TOLERANCE_DEG) {
             m_isFlipping = true;
             m_isFlipped  = true;
@@ -195,19 +213,32 @@ public class TurretSubsystem extends SubsystemBase {
         m_motor.setControl(m_openLoopRequest.withOutput(power));
     }
 
-    /** Stamps the current position as 0° (straight ahead). */
+    /**
+     * Stamps the current physical position as 0° (straight ahead).
+     * MUST be called with the turret physically pointing straight forward.
+     */
     public void zeroPosition() {
         m_motor.setPosition(0.0);
-        m_targetDeg  = 0.0;
-        m_isFlipped  = false;
-        m_isFlipping = false;
+        m_targetDeg     = 0.0;
+        m_isFlipped     = false;
+        m_isFlipping    = false;
+        m_hasBeenZeroed = true;
     }
 
-    public void stop() { m_motor.stopMotor(); }
+    public void stop() {
+        m_motor.stopMotor();
+    }
 
-    /** Current turret angle in degrees. 0 = straight ahead. */
+    // ── Getters ───────────────────────────────────────────────────────────────
+
+    /** Current turret angle in degrees. 0 = straight ahead, + = right, - = left. */
     public double getAngleDeg() {
         return m_motor.getPosition().getValueAsDouble() * 360.0;
+    }
+
+    /** True once the operator has zeroed the turret this session. */
+    public boolean hasBeenZeroed() {
+        return m_hasBeenZeroed;
     }
 
     public boolean isAtTarget() {
@@ -222,13 +253,9 @@ public class TurretSubsystem extends SubsystemBase {
         return getAngleDeg() <= TurretConstants.TURRET_REVERSE_LIMIT_DEG + TurretConstants.TURRET_ANGLE_TOLERANCE_DEG;
     }
 
-    /** True when the last command triggered a limit-flip. */
-    public boolean isFlipped() { return m_isFlipped; }
-
-    // ── Periodic ─────────────────────────────────────────────────────────────
-
-    @Override
-    public void periodic() {}
+    public boolean isFlipped() {
+        return m_isFlipped;
+    }
 
     // ── Utility ───────────────────────────────────────────────────────────────
 
@@ -238,6 +265,6 @@ public class TurretSubsystem extends SubsystemBase {
             status = m_motor.getConfigurator().apply(cfg);
             if (status.isOK()) return;
         }
-        System.out.println("[TurretSubsystem] Config failed: " + status);
+        System.out.println("[TurretSubsystem] Config failed after 5 attempts: " + status);
     }
 }

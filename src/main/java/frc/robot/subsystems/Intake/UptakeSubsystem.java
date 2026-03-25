@@ -10,37 +10,33 @@ import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants.IntakeConstants;
 
 /**
  * UptakeSubsystem — intake uptake roller (CAN ID 42, ChassisCAN bus).
  */
 public class UptakeSubsystem extends SubsystemBase {
 
-    private static final int    LEADER_ID       = 42;
-    private static final String CAN_BUS         = "ChassisCAN";
-    private static final double CRUISE_VELOCITY = 100;
-    private static final double ACCELERATION    = 200;
-
     private final TalonFX            uptakeMotor;
     private final DutyCycleOut       dutyCycleRequest   = new DutyCycleOut(0);
     private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0);
 
     public UptakeSubsystem() {
-        // FIX: new CANBus(CAN_BUS) — not new String(CAN_BUS)
-        uptakeMotor = new TalonFX(LEADER_ID, new CANBus(CAN_BUS));
+        uptakeMotor = new TalonFX(IntakeConstants.UPTAKE_MOTOR_ID,
+            new CANBus(IntakeConstants.UPTAKE_CAN_BUS));
 
         TalonFXConfiguration config = new TalonFXConfiguration();
         config.MotorOutput.Inverted    = InvertedValue.CounterClockwise_Positive;
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
 
-        config.MotionMagic.MotionMagicCruiseVelocity = CRUISE_VELOCITY;
-        config.MotionMagic.MotionMagicAcceleration   = ACCELERATION;
+        config.MotionMagic.MotionMagicCruiseVelocity = IntakeConstants.UPTAKE_CRUISE_VEL;
+        config.MotionMagic.MotionMagicAcceleration   = IntakeConstants.UPTAKE_ACCELERATION;
 
-        config.Slot0.kP = 2.0;
-        config.Slot0.kI = 0.0;
-        config.Slot0.kD = 0.1;
-        config.Voltage.PeakForwardVoltage  =  8;
-        config.Voltage.PeakReverseVoltage  = -8;
+        config.Slot0.kP = IntakeConstants.UPTAKE_kP;
+        config.Slot0.kI = IntakeConstants.UPTAKE_kI;
+        config.Slot0.kD = IntakeConstants.UPTAKE_kD;
+        config.Voltage.PeakForwardVoltage  =  IntakeConstants.UPTAKE_PEAK_VOLTAGE;
+        config.Voltage.PeakReverseVoltage  = -IntakeConstants.UPTAKE_PEAK_VOLTAGE;
 
         StatusCode status = StatusCode.StatusCodeNotInitialized;
         for (int i = 0; i < 5; ++i) {
@@ -67,7 +63,4 @@ public class UptakeSubsystem extends SubsystemBase {
     public void stopMotors() {
         uptakeMotor.stopMotor();
     }
-
-    @Override
-    public void periodic() {}
 }
