@@ -27,7 +27,8 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants.VisionConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
-
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
  * Subsystem so it can easily be used in command-based projects.
@@ -48,7 +49,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private boolean m_hasAppliedOperatorPerspective = false;
     /* Track disabled→enabled transition so we reset heading exactly once on enable */
     private boolean m_wasDisabled = true;
-
+    /** Live odometry pose display — visible in Elastic / Shuffleboard / AdvantageScope. */
+    private final Field2d m_odometryField = new Field2d();
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
     private final SwerveRequest.SysIdSwerveSteerGains m_steerCharacterization = new SwerveRequest.SysIdSwerveSteerGains();
@@ -129,6 +131,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+        SmartDashboard.putData("Odometry/Field", m_odometryField);
     }
 
     /**
@@ -232,18 +235,29 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // PathPlanner auto will override this immediately with resetPose(), so
         // auto start poses are unaffected.
         if (m_wasDisabled && !isDisabled) {
-        // Only snap heading if we have no valid starting pose yet
-            // (PathPlanner will call resetPose() immediately in auto, overriding this)
-        DriverStation.getAlliance().ifPresent(allianceColor -> {
-            Rotation2d expectedHeading = allianceColor == Alliance.Red
-                ? kRedAlliancePerspectiveRotation
-                : kBlueAlliancePerspectiveRotation;
+            DriverStation.getAlliance().ifPresent(allianceColor -> {
+                Rotation2d expectedHeading = allianceColor == Alliance.Red
+                    ? kRedAlliancePerspectiveRotation
+                    : kBlueAlliancePerspectiveRotation;
             Pose2d current = getState().Pose;
-            resetPose(new Pose2d(current.getTranslation(), expectedHeading));
-            // Remove seedFieldCentric() — let the gyro track freely from here
-         });
+
+            // Only snap heading — but ONLY if the pose is still near the seeded
+            // starting position (i.e. hasn't been overridden by vision or PathPlanner).
+            // If pose XY has moved more than 0.5 m from seed, trust what's there.
+            double seedX = frc.robot.Constants.AutoStartConstants.DEFAULT_START_X;
+            double seedY = frc.robot.Constants.AutoStartConstants.DEFAULT_START_Y;
+            double distFromSeed = current.getTranslation()
+                .getDistance(new edu.wpi.first.math.geometry.Translation2d(seedX, seedY));
+
+            if (distFromSeed < 0.5) {
+                // Still near seed — snap heading, keep XY
+                resetPose(new Pose2d(current.getTranslation(), expectedHeading));
+            }
+                // else: vision or PathPlanner already moved us — don't clobber it
+            });
         }
         m_wasDisabled = isDisabled;
+
 
         Pose2d robotPose   = getState().Pose;
         Pose3d robotPose3d = new Pose3d(robotPose);
@@ -256,7 +270,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         Logger.recordOutput("Drive/OdometryPose", getState().RawHeading != null
             ? new Pose2d(robotPose.getTranslation(), getState().RawHeading)
             : robotPose);
-
+        // Update live field display with current fused pose
+        m_odometryField.setRobotPose(robotPose);
     }
     private void startSimThread() {
         m_lastSimTime = Utils.getCurrentTimeSeconds();

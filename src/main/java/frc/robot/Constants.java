@@ -75,7 +75,10 @@ public final class Constants {
     // =========================================================================
 
     public static final class AutoStartConstants {
-
+        /** Default starting pose (field-relative, metres). Used when no PathPlanner auto resets pose. */
+        public static final double DEFAULT_START_X   = 3.476;
+        public static final double DEFAULT_START_Y   = 4.003;
+        public static final double DEFAULT_START_HDG = 0.0; // degrees — facing hub (~1.2° off, near enough)
         /** Left start — robot centre on the hub line, facing hub */
         public static final double LEFT_START_X   = 2.0;
         public static final double LEFT_START_Y   = 6.5;
@@ -338,7 +341,7 @@ public final class Constants {
         // ── Flywheel PID / feedforward (VelocityTorqueCurrentFOC, Phoenix Pro) ──
         // Gains are in Amps. Derived from SysId voltage values ÷ Kt (~0.0181 for Kraken/Falcon).
         public static final double FLYWHEEL_kP = 25.0;   // Kept at 25.0 for good RPM tracking
-        public static final double FLYWHEEL_kI = 0.8;    // Reduced from 1.2 to avoid overshoot on distance changes
+        public static final double FLYWHEEL_kI = 1.2;    // Reduced from 1.2 to avoid overshoot on distance changes
         public static final double FLYWHEEL_kD = 0.1;    // Added small D term for transient damping
         public static final double FLYWHEEL_kS = 12.426;
         public static final double FLYWHEEL_kV = 0.1565;
@@ -355,36 +358,36 @@ public final class Constants {
          *
          * Format: { distance_meters, target_rpm }
          */
-        public static final double[][] RPM_DISTANCE_TABLE = {
-            { 1.153,  1930.0 },  // ★ confirmed  (was 1.50 m bumper→face)
-            { 1.400,  2000.0 },  // interpolated
-            { 1.650,  2055.0 },  // interpolated — reduced to prevent overshooting at 2M
-            { 1.900,  2145.0 },  // interpolated — reduced slightly
-            { 2.153,  2350.0 },  // ★ confirmed  (was 2.50 m bumper→face) — increased from 2310
-            { 2.400,  2480.0 },  // interpolated — increased from 2430
-            { 2.650,  2600.0 },  // interpolated — increased from 2550  
-            { 2.900,  2710.0 },  // interpolated — increased from 2660  
-            { 3.153,  2790.0 },  // interpolated — increased from 2740  
-            { 3.400,  2820.0 },  // interpolated — increased from 2770
-            { 3.653,  2850.0 },  // ★ confirmed  (was 4.00 m bumper→face) — increased from 2800
-            { 4.000,  2950.0 },  // interpolated — increased from 2900
-            { 4.400,  3090.0 },  // interpolated — increased from 3040
-            { 4.800,  3270.0 },  // interpolated — increased from 3220
-            { 5.153,  3470.0 },  // ⚠ unconfirmed (would be 5.50 m bumper→face) — increased from 3420
+       public static final double[][] RPM_DISTANCE_TABLE = {
+            { 1.153,  1850.0 },  // ★ confirmed  (was 1.50 m bumper→face)
+            { 1.400,  1920.0 },  // interpolated
+            { 1.650,  1995.0 },  // interpolated
+            { 1.900,  2075.0 },  // interpolated
+            { 2.153,  2200.0 },  // ★ confirmed  (was 2.50 m bumper→face)
+            { 2.400,  2310.0 },  // interpolated
+            { 2.650,  2430.0 },  // interpolated
+            { 2.900,  2540.0 },  // interpolated
+            { 3.153,  2620.0 },  // interpolated
+            { 3.400,  2650.0 },  // interpolated
+            { 3.653,  2680.0 },  // ★ confirmed  (was 4.00 m bumper→face)
+            { 4.000,  2780.0 },  // interpolated — extrapolated beyond confirmed range, verify on field
+            { 4.400,  2920.0 },  // interpolated — extrapolated, verify on field
+            { 4.800,  3100.0 },  // interpolated — extrapolated, verify on field
+            { 5.153,  3300.0 },  // ⚠ unconfirmed (would be 5.50 m bumper→face) — MEASURE AND UPDATE
         };
 
         // ── D-Pad operator presets ────────────────────────────────────────────
         // Tape distances (bumper→face) shown in comments for field reference.
-        // The _DIST_M values are physics coordinates (shooter-exit→hub-center).add
+        // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
         // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
         // ── Named RPM presets (used by PathPlanner auto named commands) ─────────
-        public static final double PRESET_CLOSE_RPM    = 1980.0; // 1.5m
+        public static final double PRESET_CLOSE_RPM    = 1850.0; // ★ confirmed
         public static final double PRESET_CLOSE_DIST_M = 1.153;  // tape: 1.5 m
-        public static final double PRESET_MID_RPM      = 2350.0; // increased from 2510 for 2.5m
+        public static final double PRESET_MID_RPM      = 2200.0; // ★ confirmed (updated from 2081)
         public static final double PRESET_MID_DIST_M   = 2.153;  // tape: 2.5 m
-        public static final double PRESET_FAR_RPM      = 2850.0; // increased from 2820 for 4.0m
+        public static final double PRESET_FAR_RPM      = 2680.0; // ★ confirmed (updated from 2570)
         public static final double PRESET_FAR_DIST_M   = 3.653;  // tape: 4.0 m
-        public static final double PRESET_VFAR_RPM     = 3470.0; // increased from 3820 for 5.5m
+        public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
         public static final double PRESET_VFAR_DIST_M  = 5.153;  // tape: 5.5 m  ⚠ unconfirmed
 
         // ── D-Pad operator distance presets (used by RobotContainer D-pad bindings) ──
@@ -509,7 +512,7 @@ public final class Constants {
 
         /** Motor turns per one full turret rotation. */
         public static final double TURRET_GEAR_RATIO = 20.0;
-
+        public static final double TURRET_AIM_TRIM_DEG = 147;
         // ── Cord-safety soft limits ───────────────────────────────────────────
         // Convention: positive = RIGHT, negative = LEFT (Clockwise_Positive inversion).
         // Physical hard stops measured on robot: right +279.75°, left -266.22°.

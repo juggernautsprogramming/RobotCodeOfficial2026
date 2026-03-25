@@ -25,6 +25,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.littletonrobotics.junction.Logger;
 
+import frc.robot.Constants.AutoStartConstants;
 // Constants
 import frc.robot.Constants.ControlDeadbands;
 import frc.robot.Constants.DriveToPoseConstants;
@@ -52,8 +53,7 @@ import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.SnapAimAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurretAprilTagAimCommand;
-import frc.robot.commands.TurretOdometryAimCommand;
-
+import frc.robot.commands.TurretGimbalModeCommand;
 /**
  * RobotContainer — wires together all subsystems and button bindings.
  *
@@ -343,6 +343,16 @@ public class RobotContainer {
             drivetrain.getModule(i).getDriveMotor().getConfigurator().apply(driveLimits);
             drivetrain.getModule(i).getSteerMotor().getConfigurator().apply(steerLimits);
         }
+        // Seed odometry to known starting position immediately at boot.
+        // This gives the Kalman filter a valid prior before the DS connects
+        // and before vision locks on. PathPlanner will override this in auto.
+        drivetrain.resetPose(new Pose2d(
+            AutoStartConstants.DEFAULT_START_X,
+            AutoStartConstants.DEFAULT_START_Y,
+            Rotation2d.fromDegrees(AutoStartConstants.DEFAULT_START_HDG)
+        ));
+        // Show the seed position immediately — before the first periodic tick
+        SmartDashboard.putData("Odometry/Field", new edu.wpi.first.wpilibj.smartdashboard.Field2d());
     }
 
     // ── Trigger helpers ───────────────────────────────────────────────────────
@@ -706,7 +716,7 @@ public class RobotContainer {
                 if ("AprilTag".equals(mode)) {
                     return new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem);
                 } else if ("Odometry".equals(mode)) {
-                    return new TurretOdometryAimCommand(drivetrain, turretSubsystem);
+                    return new TurretGimbalModeCommand(drivetrain, turretSubsystem);
                 } else {
                     // "Player" mode: manual joystick control
                     return Commands.run(
