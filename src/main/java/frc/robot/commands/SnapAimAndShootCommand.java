@@ -16,6 +16,7 @@ import frc.robot.subsystems.Shooter.FireControlSolver;
 import frc.robot.subsystems.Shooter.ShooterSubsystem;
 import frc.robot.subsystems.Turret.TurretSubsystem;
 import frc.robot.subsystems.Vision.VisionSubsystem;
+import frc.robot.util.ShiftStateTracker;
 
 /**
  * Vision-triggered snap-aim-and-shoot command.
@@ -29,7 +30,7 @@ import frc.robot.subsystems.Vision.VisionSubsystem;
  *   <li><b>SETTLING</b> — Once turret is on target, RPM is on target, AND a hub
  *       AprilTag is fresh, the command waits {@value #SETTLE_S} seconds to confirm
  *       the aim is stable before firing.</li>
- *   <li><b>FIRING</b> — Feeder runs at {@value #FEED_VOLTS} V for {@value #FEED_S}
+ *   <li><b>FIRING</b> — Feeder runs at {@value #FEED_DUTY} duty cycle for {@value #FEED_S}
  *       seconds while the flywheel holds target RPM.</li>
  *   <li><b>DONE</b> — Command ends naturally. Feeder stops, flywheel idles, turret
  *       holds its current angle.</li>
@@ -57,17 +58,17 @@ public class SnapAimAndShootCommand extends Command {
     private static final double SETTLE_S = 0.10;
 
     /** Seconds to run the feeder per ball. */
-    private static final double FEED_S = 0.40;
+    private static final double FEED_S = 0.30;
 
-    /** Feeder motor voltage while feeding. */
-    private static final double FEED_VOLTS = 5.0;
+    /** Feeder duty cycle while feeding (0–1, fraction of battery voltage). */
+    private static final double FEED_DUTY = 0.55;
 
     /** Vision blend weight — 0 = pure odometry aim, 1 = pure vision aim. */
     private static final double VISION_WEIGHT = 0.6;
 
     // ── State machine ─────────────────────────────────────────────────────────
 
-    private enum Phase { AIMING, SETTLING, FIRING, DONE }
+    private enum Phase { AIMING, SETTLING, FIRING }
 
     // ── Dependencies ─────────────────────────────────────────────────────────
 
@@ -168,8 +169,8 @@ public class SnapAimAndShootCommand extends Command {
 
         // Vision correction blend (same as TurretAutoAimCommand)
         double turretTargetDeg = odomTurretDeg;
-        if (m_vision.isHubTargetFresh()) {
-            double visionRobotYaw = m_vision.getHubTagRobotFrameYawDeg();
+        if (m_vision.getBestHubTarget() != null) {
+            double visionRobotYaw = m_vision.getHubTagYawDeg();
             if (!Double.isNaN(visionRobotYaw)) {
                 visionRobotYaw = MathUtil.inputModulus(visionRobotYaw, -180.0, 180.0);
                 double diff = MathUtil.inputModulus(
@@ -184,7 +185,7 @@ public class SnapAimAndShootCommand extends Command {
 
         // ── 2. Compute and command RPM from distance ──────────────────────────
         double distPhysM;
-        if (m_vision.isHubTargetFresh()) {
+        if (m_vision.getBestHubTarget() != null) {
             // Camera-measured distance to hub (most accurate)
             distPhysM = m_vision.getHubDistanceMeters();
         } else {
@@ -197,7 +198,7 @@ public class SnapAimAndShootCommand extends Command {
         m_shooter.setFlywheelRPMFromDistance(distPhysM);
 
         // ── 3. State machine ──────────────────────────────────────────────────
-        boolean tagFresh     = m_vision.isHubTargetFresh();
+        boolean tagFresh     = m_vision.getBestHubTarget() != null;
         boolean turretReady  = m_turret.isAtTarget();
         boolean shooterReady = m_shooter.isReadyToShoot();
 
@@ -215,22 +216,24 @@ public class SnapAimAndShootCommand extends Command {
                 if (!turretReady || !shooterReady) {
                     m_phase       = Phase.AIMING;
                     m_phaseStartS = now;
-                } else if ((now - m_phaseStartS) >= SETTLE_S) {
+                } else if (ShiftStateTracker.isMyHubActive()
+                        && (now - m_phaseStartS) >= SETTLE_S) {
+                    // Only fire when the alliance hub is active (2026 shift mechanic)
                     m_phase       = Phase.FIRING;
                     m_phaseStartS = now;
-                    m_feeder.setPower(FEED_VOLTS);
+                    m_feeder.setPower(FEED_DUTY);
                 }
             }
 
             case FIRING -> {
-                // Keep flywheel at speed while feeder runs
+                // Keep flywheel at speed while feeder runs; loop back to re-aim for next ball
                 if ((now - m_phaseStartS) >= FEED_S) {
                     m_feeder.stop();
-                    m_phase = Phase.DONE;
+                    m_phase       = Phase.AIMING;
+                    m_phaseStartS = now;
                 }
             }
 
-            case DONE -> { /* isFinished() handles exit */ }
         }
 
         // ── Telemetry ─────────────────────────────────────────────────────────
@@ -238,15 +241,25 @@ public class SnapAimAndShootCommand extends Command {
         SmartDashboard.putBoolean("SnapShot/TagVisible",   tagFresh);
         SmartDashboard.putBoolean("SnapShot/TurretReady",  turretReady);
         SmartDashboard.putBoolean("SnapShot/ShooterReady", shooterReady);
+        SmartDashboard.putBoolean("SnapShot/HubActive",    ShiftStateTracker.isMyHubActive());
         SmartDashboard.putNumber ("SnapShot/CurrentRPM",   m_shooter.getCurrentRPM());
         SmartDashboard.putNumber ("SnapShot/TurretTarget", turretTargetDeg);
         SmartDashboard.putNumber ("SnapShot/TurretActual", m_turret.getAngleDeg());
         SmartDashboard.putNumber ("SnapShot/DistPhys_m",   distPhysM);
+
+        // ── SOTM telemetry (validate shoot-on-the-move correction) ────────────
+        double robotSpeed = Math.hypot(rawSpeeds.vxMetersPerSecond, rawSpeeds.vyMetersPerSecond);
+        SmartDashboard.putBoolean("SnapShot/SOTM_Valid",       result.isValid());
+        SmartDashboard.putNumber ("SnapShot/SOTM_Confidence",  result.confidence());
+        SmartDashboard.putNumber ("SnapShot/SOTM_TOF_s",       result.timeOfFlightSec());
+        SmartDashboard.putNumber ("SnapShot/SOTM_SolvedDist_m",result.solvedDistanceM());
+        SmartDashboard.putNumber ("SnapShot/SOTM_RobotSpeed",  robotSpeed);
+        SmartDashboard.putNumber ("SnapShot/SOTM_Iterations",  result.iterationsUsed());
     }
 
     @Override
     public boolean isFinished() {
-        return m_phase == Phase.DONE;
+        return false; // command runs until button is released (whileTrue cancels it)
     }
 
     @Override

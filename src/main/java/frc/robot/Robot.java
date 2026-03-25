@@ -105,7 +105,10 @@ public class Robot extends LoggedRobot {  // ✅ Must extend LoggedRobot, not Ti
     @Override public void disabledExit()       {}
     @Override public void autonomousPeriodic() {}
     @Override public void autonomousExit()     {}
-    @Override public void teleopPeriodic()     {}
+    @Override
+    public void teleopPeriodic() {
+        frc.robot.util.ShiftStateTracker.publishTelemetry();
+    }
     @Override public void teleopExit()         {}
     @Override public void testPeriodic()       {}
     @Override public void testExit()           {}

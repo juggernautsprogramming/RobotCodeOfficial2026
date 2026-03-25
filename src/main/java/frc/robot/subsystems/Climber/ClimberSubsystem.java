@@ -9,7 +9,9 @@ import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants.ClimberConstants;
 
 /**
  * ClimberSubsystem — dual-motor elevator with gravity compensation.
@@ -73,6 +75,20 @@ public class ClimberSubsystem extends SubsystemBase {
         return leaderMotor.getPosition().getValueAsDouble();
     }
 
+    /**
+     * Returns true when the climber is within tolerance of the given target.
+     * @param targetDeg target position in degrees (same units as {@link #setPositionDegrees})
+     */
+    public boolean isAtPosition(double targetDeg) {
+        double targetRot  = (targetDeg / 360.0) * GEAR_RATIO;
+        double currentRot = getCurrentPosition();
+        return Math.abs(currentRot - targetRot)
+            < (ClimberConstants.CLIMB_POSITION_TOLERANCE_DEG / 360.0);
+    }
+
     @Override
-    public void periodic() {}
+    public void periodic() {
+        SmartDashboard.putNumber ("Climber/Position_rot", getCurrentPosition());
+        SmartDashboard.putNumber ("Climber/Position_deg", getCurrentPosition() * 360.0);
+    }
 }

@@ -21,7 +21,7 @@ import frc.robot.subsystems.Shooter.ShooterSubsystem;
 public class ShootNBallsCommand extends Command {
 
     /** Time between shots for the feeder to cycle the next ball. */
-    private static final double CYCLE_TIME_S = 0.4;
+    private static final double CYCLE_TIME_S = 0.30;
 
     private enum Phase { SHOOTING, CYCLING, DONE }
 

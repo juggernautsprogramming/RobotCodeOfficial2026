@@ -44,6 +44,7 @@ import frc.robot.subsystems.Intake.IntakeAdapter;
 import frc.robot.subsystems.Turret.TurretSubsystem;
 
 // Commands
+import frc.robot.commands.AutoClimbCommand;
 import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.SnapAimAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
@@ -107,17 +108,16 @@ public class RobotContainer {
     private final double kNudgeSpeed   = 0.15 * kMaxSpeed;
 
     // ── Joystick deadbands ────────────────────────────────────────────────────
-    private static final double kTranslationDeadband = 0.15; // ignore stick drift below this
-    private static final double kRotationDeadband    = 0.20; // rotation needs larger deadband
+    // (These were replaced with inline deaband values in drive requests)
 
     // ── Slew rate limiters (acceleration limiting) ────────────────────────────
     // Units: m/s² for translation, rad/s² for rotation.
     // Lower value = smoother but less responsive. Tune on carpet.
-    private final SlewRateLimiter m_xLimiter   = new SlewRateLimiter(4.5);
-    private final SlewRateLimiter m_yLimiter   = new SlewRateLimiter(4.5);
-    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(7.0);
+    private final SlewRateLimiter m_xLimiter   = new SlewRateLimiter(3.5);
+    private final SlewRateLimiter m_yLimiter   = new SlewRateLimiter(3.5);
+    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(6.0);
 
-    // Current limits applied to drive and steer motors at runtime
+    // ── Current limits applied to drive and steer motors at runtime ───────────
     private static final double kDriveStatorLimit = 60.0;
     private static final double kDriveSupplyLimit = 40.0;
     private static final double kSteerStatorLimit = 30.0;
@@ -167,6 +167,7 @@ public class RobotContainer {
         uptakeSubsystem       = new UptakeSubsystem();
         intakeRollerSubsystem = new IntakeRollerSubsystem();
         intakeAdapter         = new IntakeAdapter(actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem);
+        climberSubsystem      = new ClimberSubsystem();
 
         // 3. Configure PathPlanner AutoBuilder
         try {
@@ -253,6 +254,10 @@ public class RobotContainer {
         NamedCommands.registerCommand("Shoot_Far",   makeShootCommand(ShooterConstants.PRESET_FAR_RPM,   8));
         NamedCommands.registerCommand("Shoot_VFar",  makeShootCommand(ShooterConstants.PRESET_VFAR_RPM,  8));
 
+        // ── Auto Level 1 climb — add to end of any auto path ─────────────────
+        NamedCommands.registerCommand("AutoClimbLevel1",
+            new AutoClimbCommand(climberSubsystem).withTimeout(3.0));
+
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
         m_autoChooser.setDefaultOption("Do Nothing", Commands.none());
@@ -261,16 +266,15 @@ public class RobotContainer {
         }
         SmartDashboard.putData("Auto Chooser", m_autoChooser);
 
-        // 7. Remaining subsystems (vision + climber — not needed by named commands)
-        visionSubsystem  = new VisionSubsystem(
+        // 7. Remaining subsystems (vision + turret — depend on drivetrain being configured)
+        visionSubsystem = new VisionSubsystem(
             new String[]{
                 VisionHardware.CAMERA_BACK_LEFT,
                 VisionHardware.CAMERA_BACK_RIGHT
             },
             drivetrain
         );
-        climberSubsystem = new ClimberSubsystem();
-        turretSubsystem  = new TurretSubsystem();
+        turretSubsystem = new TurretSubsystem();
 
         // Publish shot-calculator results once
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
@@ -326,16 +330,24 @@ public class RobotContainer {
                 double translationSpeed = getTranslationSpeed();
                 double turnScale        = getTurnScale();
 
+                // Get raw stick inputs
+                double rawX = -m_driverStick.getLeftY() * translationSpeed;
+                double rawY = -m_driverStick.getLeftX() * translationSpeed;
+                double rawRot = -MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15)
+                    * kMaxAngularRate * turnScale;
+
+                // Apply slew rate limiting for smoother acceleration
+                double limitedX = m_xLimiter.calculate(rawX);
+                double limitedY = m_yLimiter.calculate(rawY);
+                double limitedRot = m_rotLimiter.calculate(rawRot);
+
                 Logger.recordOutput("Driver/TurnScale",        turnScale);
                 Logger.recordOutput("Driver/TranslationSpeed", translationSpeed);
 
                 return m_drive
-                    .withVelocityX(-m_driverStick.getLeftY() * translationSpeed)
-                    .withVelocityY(-m_driverStick.getLeftX() * translationSpeed)
-                    .withRotationalRate(
-                        -MathUtil.applyDeadband(m_driverStick.getRightX(), 0.15)
-                        * kMaxAngularRate * turnScale
-                    );
+                    .withVelocityX(limitedX)
+                    .withVelocityY(limitedY)
+                    .withRotationalRate(limitedRot);
             })
         );
 
@@ -399,7 +411,7 @@ public class RobotContainer {
             Commands.sequence(
                 Commands.waitUntil(shooterSubsystem::isReadyToShoot),
                 Commands.startEnd(
-                    () -> feederSubsystem.setPower(5.0),
+                    () -> feederSubsystem.setPower(0.55),
                     feederSubsystem::stop,
                     feederSubsystem
                 )
@@ -436,7 +448,7 @@ public class RobotContainer {
         // Right Bumper: Reverse feeder (toggle)
         m_playerStick.rightBumper().toggleOnTrue(
             Commands.startEnd(
-                () -> feederSubsystem.setPower(-3.0),
+                () -> feederSubsystem.setPower(-0.40),
                 feederSubsystem::stop,
                 feederSubsystem
             )
@@ -526,7 +538,7 @@ public class RobotContainer {
         return Commands.sequence(
             Commands.runOnce(() -> shooterSubsystem.setFlywheelRPM(targetRpm), shooterSubsystem),
             Commands.waitUntil(() -> shooterSubsystem.isAtTargetRPM(targetRpm)).withTimeout(2.0),
-            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem),
+            Commands.runOnce(() -> feederSubsystem.setPower(0.55), feederSubsystem),
             Commands.waitSeconds(feedSeconds),
             Commands.runOnce(feederSubsystem::stop, feederSubsystem)
         );

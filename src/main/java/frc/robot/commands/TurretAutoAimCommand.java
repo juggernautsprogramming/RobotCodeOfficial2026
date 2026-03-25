@@ -146,8 +146,8 @@ public class TurretAutoAimCommand extends Command {
         double visionRobotYaw  = Double.NaN;
         boolean visionActive   = false;
 
-        if (m_vision.isHubTargetFresh()) {
-            double rawVisionYaw = m_vision.getHubTagRobotFrameYawDeg();
+        if (m_vision.getBestHubTarget() != null) {
+            double rawVisionYaw = m_vision.getHubTagYawDeg();
             if (!Double.isNaN(rawVisionYaw)) {
                 // Convert camera robot-frame yaw to a turret angle (same frame)
                 visionRobotYaw = MathUtil.inputModulus(rawVisionYaw, -180.0, 180.0);

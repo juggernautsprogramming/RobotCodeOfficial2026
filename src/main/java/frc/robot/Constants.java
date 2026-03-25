@@ -91,8 +91,8 @@ public final class Constants {
         public static final double RIGHT_START_Y   = 1.7;
         public static final double RIGHT_START_HDG = 30.0;
 
-        /** Balls to shoot from preload (first shot zone) */
-        public static final int PRELOAD_BALL_COUNT = 3;
+        /** Balls to shoot from preload (first shot zone). Robot can hold up to 8. */
+        public static final int PRELOAD_BALL_COUNT = 8;
         /** Balls picked up from the field */
         public static final int PICKUP_BALL_COUNT  = 5;
         /** Hard safety timeout for the entire auto sequence */
@@ -305,8 +305,8 @@ public final class Constants {
 
         // ── Flywheel PID / feedforward (VelocityTorqueCurrentFOC, Phoenix Pro) ──
         // Gains are in Amps. Derived from SysId voltage values ÷ Kt (~0.0181 for Kraken/Falcon).
-        public static final double FLYWHEEL_kP = 6.0;
-        public static final double FLYWHEEL_kI = 0.0;
+        public static final double FLYWHEEL_kP = 22.0;   // Increased for better RPM tracking
+        public static final double FLYWHEEL_kI = 0.5;    // Increased integral gain for steady-state
         public static final double FLYWHEEL_kD = 0.0;
         public static final double FLYWHEEL_kS = 12.426;
         public static final double FLYWHEEL_kV = 0.1565;
@@ -345,14 +345,25 @@ public final class Constants {
         // Tape distances (bumper→face) shown in comments for field reference.
         // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
         // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
+        // ── Named RPM presets (used by PathPlanner auto named commands) ─────────
         public static final double PRESET_CLOSE_RPM    = 1850.0; // ★ confirmed
-        public static final double PRESET_CLOSE_DIST_M = 1.153; // tape: 1.5 m
+        public static final double PRESET_CLOSE_DIST_M = 1.153;  // tape: 1.5 m
         public static final double PRESET_MID_RPM      = 2200.0; // ★ confirmed (updated from 2081)
-        public static final double PRESET_MID_DIST_M   = 2.153; // tape: 2.5 m
+        public static final double PRESET_MID_DIST_M   = 2.153;  // tape: 2.5 m
         public static final double PRESET_FAR_RPM      = 2680.0; // ★ confirmed (updated from 2570)
-        public static final double PRESET_FAR_DIST_M   = 3.653; // tape: 4.0 m
+        public static final double PRESET_FAR_DIST_M   = 3.653;  // tape: 4.0 m
         public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
-        public static final double PRESET_VFAR_DIST_M  = 5.153; // tape: 5.5 m  ⚠ unconfirmed
+        public static final double PRESET_VFAR_DIST_M  = 5.153;  // tape: 5.5 m  ⚠ unconfirmed
+
+        // ── D-Pad operator distance presets (used by RobotContainer D-pad bindings) ──
+        // RPM is interpolated live from RPM_DISTANCE_TABLE via setFlywheelRPMFromDistance().
+        // _DIST_M values are shooter-exit → hub-center distances.
+        // Tape (bumper→face) distances shown in comments for field reference.
+        public static final double PRESET_2M_DIST_M   = 1.653; // tape: 2.0 m
+        public static final double PRESET_3M_DIST_M   = 2.653; // tape: 3.0 m
+        public static final double PRESET_3_5M_DIST_M = 3.153; // tape: 3.5 m
+        public static final double PRESET_4_5M_DIST_M = 4.153; // tape: 4.5 m
+        public static final double PRESET_5M_DIST_M   = 4.653; // tape: 5.0 m
 
 
         /**
@@ -490,6 +501,31 @@ public final class Constants {
         public static final double TURRET_STATOR_LIMIT_AMPS   = 40.0;
 
         private TurretConstants() {}
+    }
+
+    // =========================================================================
+    // CLIMBER
+    // =========================================================================
+
+    public static final class ClimberConstants {
+
+        /**
+         * Motor encoder degrees for the Level 1 rung position.
+         *
+         * ── How to tune ──────────────────────────────────────────────────────
+         * 1. Manually jog the climber up until the hooks contact the Level 1 rung.
+         * 2. Read the current position from SmartDashboard → Climber/Position_rot.
+         * 3. Multiply by 360 to convert rotations → degrees.
+         * 4. Replace the placeholder below with that value.
+         *
+         * The Level 1 rung is 27 in (0.686 m) above the carpet.
+         */
+        public static final double LEVEL1_CLIMB_DEGREES = 720.0; // ⚠ placeholder — tune on robot
+
+        /** Position tolerance for "at target" check (degrees). */
+        public static final double CLIMB_POSITION_TOLERANCE_DEG = 18.0; // ≈ 0.05 rotations
+
+        private ClimberConstants() {}
     }
 
     // =========================================================================
