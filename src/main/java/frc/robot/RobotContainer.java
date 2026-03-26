@@ -303,11 +303,14 @@ public class RobotContainer {
         visionSubsystem = new VisionSubsystem(
             new String[]{
                 VisionHardware.CAMERA_BACK_LEFT,
-                VisionHardware.CAMERA_BACK_RIGHT
+                VisionHardware.CAMERA_BACK,
+                VisionHardware.CAMERA_BACK_RIGHT,
+                VisionHardware.CAMERA_TURRET
             },
             drivetrain
         );
         turretSubsystem = new TurretSubsystem();
+        visionSubsystem.setTurretSubsystem(turretSubsystem);
 
         // Publish shot-calculator results once
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);

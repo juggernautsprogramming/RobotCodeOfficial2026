@@ -21,6 +21,7 @@ import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
@@ -32,6 +33,7 @@ import frc.robot.Constants.ShooterConstants;
 import frc.robot.Constants.VisionConstants;
 import frc.robot.Constants.VisionHardware;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Turret.TurretSubsystem;
 
 /**
  * VisionSubsystem — multi-camera PhotonVision → Kalman filter pose fusion.
@@ -177,6 +179,15 @@ public class VisionSubsystem extends SubsystemBase {
     private double   m_lastVisionTimeS = 0.0;
 
     /**
+     * Index into {@link #m_sensors} for the turret-mounted camera, or -1 if not present.
+     * Set in constructor; used by periodic() to push the live turret yaw each loop.
+     */
+    private int m_turretSensorIndex = -1;
+
+    /** Reference to the turret subsystem for live angle queries. Null until wired. */
+    private TurretSubsystem m_turretSubsystem = null;
+
+    /**
      * Cached 3-D poses of all tags in the loaded layout.
      * Populated once after DS alliance is known (tag layout origin may flip).
      * Logged every loop so late-joining AdvantageScope instances see the data.
@@ -232,10 +243,14 @@ public class VisionSubsystem extends SubsystemBase {
             VisionConstants.kP, VisionConstants.kI, VisionConstants.kD);
         m_alignPID.setTolerance(VisionConstants.angleTolerance);
 
-        for (String name : cameraNames) {
+        for (int i = 0; i < cameraNames.length; i++) {
+            String name = cameraNames[i];
             Transform3d robotToCam = VisionHardware.kCameraOffsets.getOrDefault(
                 name, VisionHardware.kDefaultRobotToCam);
             m_sensors.add(new ReadAprilTag(name, robotToCam));
+            if (VisionHardware.CAMERA_TURRET.equals(name)) {
+                m_turretSensorIndex = i;
+            }
         }
 
         SmartDashboard.putData("Vision/Field Map",     m_field);
@@ -279,6 +294,22 @@ public class VisionSubsystem extends SubsystemBase {
 
         Pose2d robotPose = m_drivetrain.getState().Pose;
         double now       = RobotController.getFPGATime() * 1e-6; // µs → s
+
+        // Update turret camera transform with the live turret angle.
+        // The camera sits at a fixed position in the turret's local frame (kTurretCamTurretFrame).
+        // Its x/y must be rotated into robot frame, and the turret yaw added to its orientation.
+        if (m_turretSensorIndex >= 0 && m_turretSubsystem != null) {
+            double θ = Math.toRadians(m_turretSubsystem.getAngleDeg());
+            Translation3d t = VisionHardware.kTurretCamTurretFrame.getTranslation();
+            // Rotate the horizontal (x/y) offset from turret frame into robot frame
+            double xRobot = t.getX() * Math.cos(θ) - t.getY() * Math.sin(θ);
+            double yRobot = t.getX() * Math.sin(θ) + t.getY() * Math.cos(θ);
+            // Camera rotation: fixed pitch from turret frame + live turret yaw
+            double pitchRad = VisionHardware.kTurretCamTurretFrame.getRotation().getY();
+            m_sensors.get(m_turretSensorIndex).setRobotToCam(new Transform3d(
+                new Translation3d(xRobot, yRobot, t.getZ()),
+                new Rotation3d(0, pitchRad, θ)));
+        }
 
         for (ReadAprilTag sensor : m_sensors) {
 
@@ -526,6 +557,15 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     // ── Public accessors ──────────────────────────────────────────────────────
+
+    /**
+     * Wires the turret subsystem so the turret camera's transform is updated
+     * dynamically every loop. Call once from RobotContainer after both subsystems
+     * are constructed.
+     */
+    public void setTurretSubsystem(TurretSubsystem turret) {
+        m_turretSubsystem = turret;
+    }
 
     /**
      * Enable or disable vision injection into the Kalman filter.

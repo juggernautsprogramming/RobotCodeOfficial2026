@@ -140,30 +140,82 @@ public final class Constants {
 
     public static final class VisionHardware {
 
-        /** Name used in PhotonVision UI for the rear-right camera. */
-        public static final String CAMERA_BACK_RIGHT = "Camera-BackRight";
-        /** Name used in PhotonVision UI for the rear-left camera. */
-        public static final String CAMERA_BACK_LEFT  = "Camera-BackLeft";
+        // ── PhotonVision camera names (must match names set in PhotonVision UI) ──
+        public static final String CAMERA_BACK_LEFT  = "Camera-BackLeft";   // facing left,  zθ=270°
+        public static final String CAMERA_BACK       = "Camera-Back";       // facing back,  zθ=180°
+        public static final String CAMERA_BACK_RIGHT = "Camera-BackRight";  // facing right, zθ=90°
+        /** Turret-mounted camera — transform must be updated dynamically as turret rotates. */
+        public static final String CAMERA_TURRET     = "Camera-Turret";
 
         /**
-         * All camera offsets keyed by camera name.
-         * Transform3d is robot-center → camera (forward=+X, left=+Y, up=+Z).
+         * Fixed-camera offsets from robot centre (forward=+X, left=+Y, up=+Z).
+         * Rotation3d(roll, pitch, yaw):
+         *   pitch < 0  = camera tilts upward (30° upward tilt → −30°)
+         *   yaw        = horizontal pointing direction (90°=left, 180°=back, 270°=right)
+         *
+         * Values measured in CAD (inches → metres).
+         * Note: left & right cameras share the same x/z; verify y-sign symmetry on robot.
          */
         public static final Map<String, Transform3d> kCameraOffsets = Map.of(
-            CAMERA_BACK_RIGHT, new Transform3d(
-                new Translation3d(
-                    Units.inchesToMeters(10),
-                    Units.inchesToMeters(10),
-                    Units.inchesToMeters(20)),
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(90))
-            ),
+            // Left camera — faces left (zθ=270° CW → 90° CCW in WPILib), tilts up 30°
             CAMERA_BACK_LEFT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(-10),
-                    Units.inchesToMeters(10),
-                    Units.inchesToMeters(20)),
-                new Rotation3d(0, Units.degreesToRadians(-20), Units.degreesToRadians(285))
+                    Units.inchesToMeters(-13.747),
+                    Units.inchesToMeters(-10.489),
+                    Units.inchesToMeters(25.880)),
+                new Rotation3d(0,
+                    Units.degreesToRadians(-30),   // upward tilt (yθ=30°)
+                    Units.degreesToRadians(90))    // facing left
+            ),
+            // Back camera — faces backward (zθ=180°), tilts up 30° via roll (xθ=30°)
+            CAMERA_BACK, new Transform3d(
+                new Translation3d(
+                    Units.inchesToMeters(-10.511),
+                    Units.inchesToMeters(-10.872),
+                    Units.inchesToMeters(25.880)),
+                new Rotation3d(
+                    Units.degreesToRadians(-30),   // upward tilt (xθ=30°, back-facing)
+                    0,
+                    Units.degreesToRadians(180))   // facing back
+            ),
+            // Right camera — faces right (zθ=90° CW → 270° CCW in WPILib), tilts up 30°
+            CAMERA_BACK_RIGHT, new Transform3d(
+                new Translation3d(
+                    Units.inchesToMeters(-13.747),
+                    Units.inchesToMeters(-10.489),
+                    Units.inchesToMeters(25.880)),
+                new Rotation3d(0,
+                    Units.degreesToRadians(-30),   // upward tilt (yθ=30°)
+                    Units.degreesToRadians(270))   // facing right
+            ),
+            // Turret camera — initial static transform (turret at 0°, facing forward).
+            // Live transform is recomputed each loop by VisionSubsystem using kTurretCamTurretFrame.
+            CAMERA_TURRET, new Transform3d(
+                new Translation3d(
+                    Units.inchesToMeters(5.735),   // x: forward from turret pivot
+                    Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left in WPILib)
+                    Units.inchesToMeters(25.387)), // z: total height above robot centre
+                new Rotation3d(0, Units.degreesToRadians(-68), 0) // 68° upward pitch, facing forward
             )
+        );
+
+        /**
+         * Turret camera position/orientation in the TURRET'S LOCAL frame (turret pivot = origin).
+         *
+         * <p>Translation:
+         *   x = 5.735 in forward from turret pivot
+         *   y = 5.341 in lateral from turret pivot (+y = left in WPILib convention)
+         *   z = 25.387 in total height above robot centre (measured directly)
+         *
+         * <p>Rotation: 68° upward pitch. Yaw is always 0 in turret frame (camera faces forward on turret).
+         *   VisionSubsystem rotates x/y by the live turret angle and adds turret yaw each loop.
+         */
+        public static final Transform3d kTurretCamTurretFrame = new Transform3d(
+            new Translation3d(
+                Units.inchesToMeters(5.735),   // x: forward from turret pivot
+                Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left)
+                Units.inchesToMeters(25.387)), // z: total height above robot centre
+            new Rotation3d(0, Units.degreesToRadians(-68), 0) // 68° upward pitch; yaw added dynamically
         );
 
         /** Fallback transform used if a camera name is not in kCameraOffsets. */

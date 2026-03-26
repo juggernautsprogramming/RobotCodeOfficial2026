@@ -151,6 +151,14 @@ public class ReadAprilTag {
     public PhotonPipelineResult getLatestResult() { return m_latestResult; }
 
     /**
+     * Updates the robot-to-camera transform used by the pose estimator.
+     * Call each loop for a turret-mounted camera to track the live turret angle.
+     */
+    public void setRobotToCam(Transform3d newTransform) {
+        m_poseEstimator.setRobotToCameraTransform(newTransform);
+    }
+
+    /**
      * All 3D robot pose estimates from the last {@link #update()} call, as a
      * {@code Pose3d[]} array ready for AdvantageScope 3D field visualization.
      */
