@@ -263,9 +263,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         Pose3d robotPose3d = new Pose3d(robotPose);
         Logger.recordOutput("Drive/RobotPose3d", robotPose3d);
         Logger.recordOutput("Vision/CameraPoses", new Pose3d[] {
-            robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_BACK_LEFT)),
+            robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_LEFT)),
             robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_BACK)),
-            robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_BACK_RIGHT)),
+            //robotPose3d.transformBy(VisionHardware.kCameraOffsets.get(VisionHardware.CAMERA_BACK_RIGHT)),
             robotPose3d.transformBy(VisionHardware.kTurretCamTurretFrame)
         });
         // ✅ Raw odometry only (no vision influence) — wheel encoders + gyro

@@ -1,7 +1,5 @@
 package frc.robot;
 
-import java.io.IOException;
-import java.nio.file.Path;
 import java.util.Map;
 
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
@@ -13,8 +11,6 @@ import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.Filesystem;
 
 /**
  * Central constants file for the FRC 2026 robot.
@@ -141,11 +137,10 @@ public final class Constants {
     public static final class VisionHardware {
 
         // ── PhotonVision camera names (must match names set in PhotonVision UI) ──
-        public static final String CAMERA_BACK_LEFT  = "Camera-BackLeft";   // facing left,  zθ=270°
-        public static final String CAMERA_BACK       = "Camera-Back";       // facing back,  zθ=180°
-        public static final String CAMERA_BACK_RIGHT = "Camera-BackRight";  // facing right, zθ=90°
+        public static final String CAMERA_LEFT  = "Camera_Left";   // facing left,  zθ=270°
+        public static final String CAMERA_BACK  = "Camera_Back";       // facing back,  zθ=180°
         /** Turret-mounted camera — transform must be updated dynamically as turret rotates. */
-        public static final String CAMERA_TURRET     = "Camera-Turret";
+        public static final String CAMERA_TURRET = "camera_turret";
 
         /**
          * Fixed-camera offsets from robot centre (forward=+X, left=+Y, up=+Z).
@@ -158,28 +153,28 @@ public final class Constants {
          */
         public static final Map<String, Transform3d> kCameraOffsets = Map.of(
             // Left camera — faces left (zθ=270° CW → 90° CCW in WPILib), tilts up 30°
-            CAMERA_BACK_LEFT, new Transform3d(
+            CAMERA_LEFT, new Transform3d(
                 new Translation3d(
                     Units.inchesToMeters(-13.747),
                     Units.inchesToMeters(-10.489),
                     Units.inchesToMeters(25.880)),
                 new Rotation3d(0,
-                    Units.degreesToRadians(-30),   // upward tilt (yθ=30°)
-                    Units.degreesToRadians(90))    // facing left
+                    Units.degreesToRadians(-30),  // upward tilt: negative pitch in WPILib convention
+                    Units.degreesToRadians(270))   // facing left (270° in WPILib = -90° = left)
             ),
-            // Back camera — faces backward (zθ=180°), tilts up 30° via roll (xθ=30°)
+            // Back camera — faces backward (zθ=180°), tilts up 30°
             CAMERA_BACK, new Transform3d(
                 new Translation3d(
                     Units.inchesToMeters(-10.511),
                     Units.inchesToMeters(-10.872),
                     Units.inchesToMeters(25.880)),
                 new Rotation3d(
-                    Units.degreesToRadians(-30),   // upward tilt (xθ=30°, back-facing)
                     0,
+                    Units.degreesToRadians(-30),  // upward tilt: negative pitch in WPILib convention
                     Units.degreesToRadians(180))   // facing back
             ),
             // Right camera — faces right (zθ=90° CW → 270° CCW in WPILib), tilts up 30°
-            CAMERA_BACK_RIGHT, new Transform3d(
+            /**CAMERA_BACK_RIGHT, new Transform3d(
                 new Translation3d(
                     Units.inchesToMeters(-13.747),
                     Units.inchesToMeters(-10.489),
@@ -187,7 +182,7 @@ public final class Constants {
                 new Rotation3d(0,
                     Units.degreesToRadians(-30),   // upward tilt (yθ=30°)
                     Units.degreesToRadians(270))   // facing right
-            ),
+            ),*/
             // Turret camera — initial static transform (turret at 0°, facing forward).
             // Live transform is recomputed each loop by VisionSubsystem using kTurretCamTurretFrame.
             CAMERA_TURRET, new Transform3d(
@@ -195,7 +190,7 @@ public final class Constants {
                     Units.inchesToMeters(5.735),   // x: forward from turret pivot
                     Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left in WPILib)
                     Units.inchesToMeters(25.387)), // z: total height above robot centre
-                new Rotation3d(0, Units.degreesToRadians(-68), 0) // 68° upward pitch, facing forward
+                new Rotation3d(0, Units.degreesToRadians(23), 0) 
             )
         );
 
@@ -207,7 +202,7 @@ public final class Constants {
          *   y = 5.341 in lateral from turret pivot (+y = left in WPILib convention)
          *   z = 25.387 in total height above robot centre (measured directly)
          *
-         * <p>Rotation: 68° upward pitch. Yaw is always 0 in turret frame (camera faces forward on turret).
+         * <p>Rotation: 67° upward pitch. Yaw is always 0 in turret frame (camera faces forward on turret).
          *   VisionSubsystem rotates x/y by the live turret angle and adds turret yaw each loop.
          */
         public static final Transform3d kTurretCamTurretFrame = new Transform3d(
@@ -215,7 +210,7 @@ public final class Constants {
                 Units.inchesToMeters(5.735),   // x: forward from turret pivot
                 Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left)
                 Units.inchesToMeters(25.387)), // z: total height above robot centre
-            new Rotation3d(0, Units.degreesToRadians(-68), 0) // 68° upward pitch; yaw added dynamically
+            new Rotation3d(0, Units.degreesToRadians(-67), 0) // 67° upward pitch; yaw added dynamically
         );
 
         /** Fallback transform used if a camera name is not in kCameraOffsets. */
@@ -231,21 +226,8 @@ public final class Constants {
     public static final class VisionConstants {
 
         /** 2026 field AprilTag layout — used by PhotonPoseEstimator. */
-        public static AprilTagFieldLayout kTagLayout;
-        static {
-            try {
-                Path path = Filesystem.getDeployDirectory().toPath().resolve("custom_hub.json");
-                kTagLayout = new AprilTagFieldLayout(path);
-            } catch (IOException e) {
-                DriverStation.reportError("Could not load custom AprilTag layout!", e.getStackTrace());
-                kTagLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
-            }
-        }
-
-        /** Full field length — from blue wall to red wall (metres). */
-        public static final double FIELD_LENGTH_M = 8.0;
-        /** Full field width (metres). */
-        public static final double FIELD_WIDTH_M  = 8.052;
+        public static final AprilTagFieldLayout kTagLayout =
+            AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
 
         /** Maximum pose ambiguity ratio accepted from a single-tag solve. */
         public static final double kAmbiguityThreshold = 0.2;
@@ -327,8 +309,8 @@ public final class Constants {
 
         // ── Field / Hub geometry ──────────────────────────────────────────────
         /**
-         * Hub center on the custom 8 m × 8.052 m field (metres).
-         * Derived from the four hub AprilTag positions in custom_hub.json.
+         * Hub center on the full 2026 FRC field (metres, blue-alliance origin).
+         * TODO: verify against the official field layout or measure on-field.
          */
         public static final Translation2d HUB_CENTER =
                 new Translation2d(4.5969, 4.026);
@@ -548,7 +530,7 @@ public final class Constants {
         /** Gravitational acceleration (m/s²). */
         public static final double g = 9.81;
 
-        public static final double FIXED_SHOT_RPM_M = 2300;
+        public static final double FIXED_SHOT_RPM_M = 1995.0;
 
         private ShooterConstants() {}
     }

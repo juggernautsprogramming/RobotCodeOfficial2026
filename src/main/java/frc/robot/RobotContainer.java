@@ -302,9 +302,9 @@ public class RobotContainer {
         // 7. Remaining subsystems (vision + turret — depend on drivetrain being configured)
         visionSubsystem = new VisionSubsystem(
             new String[]{
-                VisionHardware.CAMERA_BACK_LEFT,
+                VisionHardware.CAMERA_LEFT,
                 VisionHardware.CAMERA_BACK,
-                VisionHardware.CAMERA_BACK_RIGHT,
+                //VisionHardware.CAMERA_BACK_RIGHT,
                 VisionHardware.CAMERA_TURRET
             },
             drivetrain
@@ -354,8 +354,7 @@ public class RobotContainer {
             AutoStartConstants.DEFAULT_START_Y,
             Rotation2d.fromDegrees(AutoStartConstants.DEFAULT_START_HDG)
         ));
-        // Show the seed position immediately — before the first periodic tick
-        SmartDashboard.putData("Odometry/Field", new edu.wpi.first.wpilibj.smartdashboard.Field2d());
+        // Seed is applied — drivetrain's periodic() will update its Field2d automatically
     }
 
     // ── Trigger helpers ───────────────────────────────────────────────────────

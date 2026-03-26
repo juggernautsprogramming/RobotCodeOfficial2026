@@ -120,7 +120,7 @@ public class VisionSubsystem extends SubsystemBase {
     private static final double MAX_POSE_JUMP_M = 1.0;
 
     /** Discard measurements older than this many seconds (stale-frame guard). */
-    private static final double VISION_STALENESS_S = 0.150;
+    private static final double VISION_STALENESS_S = 0.500;
 
     // ── Std-dev trust model ───────────────────────────────────────────────────
 
@@ -226,8 +226,8 @@ public class VisionSubsystem extends SubsystemBase {
     /** Latest accepted vision pose — viewable in AdvantageScope as 'Vision/RobotPose'. */
     private final StructPublisher<Pose3d> m_visionPosePublisher;
 
-    /** Robot-to-camera transforms for all cameras — 'Vision/CameraTransforms'. */
-    private final StructArrayPublisher<Transform3d> m_cameraTransformPublisher;
+    /** Field-frame camera poses (updated every loop) — 'Vision/CameraPoses'. */
+    private final StructArrayPublisher<Pose3d> m_cameraPosePublisher;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -257,16 +257,8 @@ public class VisionSubsystem extends SubsystemBase {
         SmartDashboard.putData("Vision/Field Cameras", m_fieldCameras);
 
         var nt = NetworkTableInstance.getDefault();
-        m_visionPosePublisher      = nt.getStructTopic("Vision/RobotPose", Pose3d.struct).publish();
-        m_cameraTransformPublisher = nt.getStructArrayTopic("Vision/CameraTransforms", Transform3d.struct).publish();
-
-        // Publish static camera offsets once — they don't change at runtime
-        Transform3d[] offsets = new Transform3d[cameraNames.length];
-        for (int i = 0; i < cameraNames.length; i++) {
-            offsets[i] = VisionHardware.kCameraOffsets.getOrDefault(
-                cameraNames[i], VisionHardware.kDefaultRobotToCam);
-        }
-        m_cameraTransformPublisher.set(offsets);
+        m_visionPosePublisher  = nt.getStructTopic("Vision/RobotPose", Pose3d.struct).publish();
+        m_cameraPosePublisher  = nt.getStructArrayTopic("Vision/CameraPoses", Pose3d.struct).publish();
     }
 
     // ── Periodic ──────────────────────────────────────────────────────────────
@@ -299,16 +291,16 @@ public class VisionSubsystem extends SubsystemBase {
         // The camera sits at a fixed position in the turret's local frame (kTurretCamTurretFrame).
         // Its x/y must be rotated into robot frame, and the turret yaw added to its orientation.
         if (m_turretSensorIndex >= 0 && m_turretSubsystem != null) {
-            double θ = Math.toRadians(m_turretSubsystem.getAngleDeg());
+            double theta = Math.toRadians(m_turretSubsystem.getAngleDeg());
             Translation3d t = VisionHardware.kTurretCamTurretFrame.getTranslation();
             // Rotate the horizontal (x/y) offset from turret frame into robot frame
-            double xRobot = t.getX() * Math.cos(θ) - t.getY() * Math.sin(θ);
-            double yRobot = t.getX() * Math.sin(θ) + t.getY() * Math.cos(θ);
+            double xRobot = t.getX() * Math.cos(theta) - t.getY() * Math.sin(theta);
+            double yRobot = t.getX() * Math.sin(theta) + t.getY() * Math.cos(theta);
             // Camera rotation: fixed pitch from turret frame + live turret yaw
             double pitchRad = VisionHardware.kTurretCamTurretFrame.getRotation().getY();
             m_sensors.get(m_turretSensorIndex).setRobotToCam(new Transform3d(
                 new Translation3d(xRobot, yRobot, t.getZ()),
-                new Rotation3d(0, pitchRad, θ)));
+                new Rotation3d(0, pitchRad, theta)));
         }
 
         for (ReadAprilTag sensor : m_sensors) {
@@ -321,6 +313,9 @@ public class VisionSubsystem extends SubsystemBase {
 
                 Pose2d estPose   = estimate.estimatedPose.toPose2d();
                 double timestamp = estimate.timestampSeconds;
+                
+                // Determine if this is the turret camera
+                boolean isTurretCamera = (m_turretSensorIndex >= 0 && sensor == m_sensors.get(m_turretSensorIndex));
 
                 // ── Sanity Filter ─────────────────────────────────────────────
 
@@ -328,7 +323,8 @@ public class VisionSubsystem extends SubsystemBase {
                 if ((now - timestamp) > VISION_STALENESS_S) { rejStale++; continue; }
 
                 // (b) Field boundaries: robot cannot be outside the field
-                if (!isWithinField(estPose)) { rejOutOfBounds++; continue; }
+                // Turret camera only used for rotation, so skip field bounds check for it
+                if (!isTurretCamera && !isWithinField(estPose)) { rejOutOfBounds++; continue; }
 
                 // ── Tag metrics from this specific estimate's targets ─────────
                 // Computed from estimate.targetsUsed so each frame in the batch
@@ -343,26 +339,28 @@ public class VisionSubsystem extends SubsystemBase {
                     .mapToDouble(t -> t.getPoseAmbiguity())
                     .min().orElse(1.0);
 
-                // (c) Large pose jump handling
-                // Normal Kalman updates can't bridge a multi-metre gap (e.g. robot
-                // starts at 0,0 but the tags say it's at 2,3).  If the fix is
-                // reasonable confidence (low ambiguity) we RESET the pose so
-                // odometry immediately starts from the correct field position.
-                // High-ambiguity large jumps are still rejected to guard against
-                // bad single-tag solves corrupting the estimator.
-                double jumpDist = estPose.getTranslation()
-                    .getDistance(robotPose.getTranslation());
-                if (jumpDist > MAX_POSE_JUMP_M) {
-                    if (ambiguity < 0.3 && m_visionEnabled) {
-                        m_drivetrain.resetPose(estPose);
-                        robotPose = estPose; // update local ref so rest of loop uses new pose
-                        Logger.recordOutput("Vision/PoseReset", true);
-                    } else {
-                        rejTeleport++;
+                // (c) Large pose jump handling — only for non-turret cameras
+                // Turret camera is rotation-only, so skip large jump detection
+                if (!isTurretCamera) {
+                    double jumpDist = estPose.getTranslation()
+                        .getDistance(robotPose.getTranslation());
+                    if (jumpDist > MAX_POSE_JUMP_M) {
+                        // Check heading consistency: large jump + large heading change = reject
+                        double headingDelta = Math.abs(estPose.getRotation().minus(robotPose.getRotation()).getRadians());
+                        if (headingDelta > Math.PI / 2.0) {
+                            // >90° heading flip = likely PnP ambiguity, reject regardless of ambiguity
+                            rejTeleport++;
+                        } else if (ambiguity < 0.3 && m_visionEnabled) {
+                            m_drivetrain.resetPose(estPose);
+                            robotPose = estPose; // update local ref so rest of loop uses new pose
+                            Logger.recordOutput("Vision/PoseReset", true);
+                        } else {
+                            rejTeleport++;
+                        }
+                        continue; // don't also add as vision measurement after reset
                     }
-                    continue; // don't also add as vision measurement after reset
+                    Logger.recordOutput("Vision/PoseReset", false);
                 }
-                Logger.recordOutput("Vision/PoseReset", false);
 
                 // Base XY std-dev scales quadratically with range
                 double xyStdDev = XY_BASE_STDDEV + dist * dist * XY_DIST_COEFF;
@@ -374,7 +372,11 @@ public class VisionSubsystem extends SubsystemBase {
                 xyStdDev *= (1.0 + ambiguity * (AMBIGUITY_SCALE - 1.0));
 
                 // Rotation: gyro owns heading. Vision only corrects XY.
+                // Turret camera is rotation-only, so set XY std-dev to infinity (ignore XY)
                 double rotStdDev = ROT_STDDEV_RAD;
+                if (isTurretCamera) {
+                    xyStdDev = 9999.0; // Ignore X,Y from turret camera
+                }
 
                 // ── Feed to Kalman filter at the historical timestamp ──────────
                 // Skipped when vision is paused (e.g. DriveToPose is active) so
@@ -389,8 +391,11 @@ public class VisionSubsystem extends SubsystemBase {
                     VecBuilder.fill(xyStdDev, xyStdDev, rotStdDev));
 
                 // Track for ghost pose display, consensus calc, and AdvantageScope
-                acceptedPoses.add(estPose);
-                acceptedStdDevs.add(xyStdDev);
+                // Don't add X,Y to consensus if turret camera
+                if (!isTurretCamera) {
+                    acceptedPoses.add(estPose);
+                    acceptedStdDevs.add(xyStdDev);
+                }
                 if (m_lastVisionPose == null || timestamp > m_lastVisionTimeS) {
                     m_lastVisionPose  = estPose;
                     m_lastVisionTimeS = now;
@@ -404,7 +409,11 @@ public class VisionSubsystem extends SubsystemBase {
                 Logger.recordOutput(logPrefix + "TagCount",   (double) tagCount);
                 Logger.recordOutput(logPrefix + "Distance_m", dist);
                 Logger.recordOutput(logPrefix + "Ambiguity",  ambiguity);
-                Logger.recordOutput(logPrefix + "JumpDist_m", jumpDist);
+                if (!isTurretCamera) {
+                    double jumpDist = estPose.getTranslation()
+                        .getDistance(robotPose.getTranslation());
+                    Logger.recordOutput(logPrefix + "JumpDist_m", jumpDist);
+                }
             }
 
             // Per-camera 3D estimated poses — for AdvantageScope 3D field view.
@@ -551,6 +560,14 @@ public class VisionSubsystem extends SubsystemBase {
         Logger.recordOutput("Vision/Rejected/OutOfBounds", (double) rejOutOfBounds);
         Logger.recordOutput("Vision/Rejected/Teleport",    (double) rejTeleport);
 
+        // ── Camera poses in field frame (move with robot) ─────────────────────
+        Pose3d robotPose3d = new Pose3d(robotPose);
+        Pose3d[] camPoses = new Pose3d[m_sensors.size()];
+        for (int i = 0; i < m_sensors.size(); i++) {
+            camPoses[i] = robotPose3d.transformBy(m_sensors.get(i).getRobotToCam());
+        }
+        m_cameraPosePublisher.set(camPoses);
+
         // ── Dashboard ─────────────────────────────────────────────────────────
         m_field.setRobotPose(m_drivetrain.getState().Pose);
         updateUI();
@@ -668,8 +685,8 @@ public class VisionSubsystem extends SubsystemBase {
 
     /** Called once after the DriverStation alliance is known. */
     private void updateAllianceOrigin() {
-        // Custom hub layout uses absolute coordinates — do NOT flip by alliance.
-        // Alliance origin flipping is only correct for the full FRC field layout.
+        // Use blue alliance wall as the fixed coordinate origin (WPILib standard).
+        // All field coordinates are always in blue-origin space.
         VisionConstants.kTagLayout.setOrigin(
             edu.wpi.first.apriltag.AprilTagFieldLayout.OriginPosition.kBlueAllianceWallRightSide);
 

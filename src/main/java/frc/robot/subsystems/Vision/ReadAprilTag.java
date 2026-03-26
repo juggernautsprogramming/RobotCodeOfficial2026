@@ -41,7 +41,7 @@ public class ReadAprilTag {
 
     private final PhotonCamera        m_camera;
     private final PhotonPoseEstimator m_poseEstimator;
-    private final Transform3d         m_robotToCam;
+    private Transform3d               m_robotToCam;
 
     /** Most recent pipeline result — used by accessors. */
     private PhotonPipelineResult m_latestResult = null;
@@ -86,7 +86,10 @@ public class ReadAprilTag {
         m_newEstimates.clear();
 
         List<PhotonPipelineResult> unread = m_camera.getAllUnreadResults();
-        if (unread.isEmpty()) return;
+        if (unread.isEmpty()) {
+            publishTelemetry(); // still publish so SmartDashboard shows "Has Target = false"
+            return;
+        }
 
         for (PhotonPipelineResult result : unread) {
             if (!result.hasTargets()) continue;
@@ -150,11 +153,15 @@ public class ReadAprilTag {
     public String               getName()         { return m_camera.getName(); }
     public PhotonPipelineResult getLatestResult() { return m_latestResult; }
 
+    /** Current robot-to-camera transform (updated each loop for turret cameras). */
+    public Transform3d getRobotToCam() { return m_robotToCam; }
+
     /**
      * Updates the robot-to-camera transform used by the pose estimator.
      * Call each loop for a turret-mounted camera to track the live turret angle.
      */
     public void setRobotToCam(Transform3d newTransform) {
+        m_robotToCam = newTransform;
         m_poseEstimator.setRobotToCameraTransform(newTransform);
     }
 
