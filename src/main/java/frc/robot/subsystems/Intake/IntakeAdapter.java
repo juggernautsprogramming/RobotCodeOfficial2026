@@ -40,8 +40,8 @@ public class IntakeAdapter extends SubsystemBase {
     public void run() {
         m_retractingToStow = false;
         m_actuation.setPosition(IntakeConstants.DEPLOYED_ROTATIONS);
-        m_uptake.setPower(IntakeConstants.ROLLER_POWER);
-        m_rollers.setPower(IntakeConstants.BAR_POWER);
+        m_uptake.setPower(IntakeConstants.ROLLER_POWER_IN);
+        m_rollers.setPower(IntakeConstants.BAR_POWER_IN);
     }
 
     /**

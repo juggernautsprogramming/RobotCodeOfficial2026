@@ -612,6 +612,34 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     /**
+     * Physics distance to the hub centre (metres) for RPM interpolation,
+     * derived from the Kalman-fused odometry pose.
+     *
+     * <p>Always returns a value — no vision gate. Use this for continuous
+     * shoot-on-the-move RPM updates so the flywheel tracks field position
+     * regardless of whether a tag is visible.
+     *
+     * @return shooter-exit → hub-face distance in metres (clamped ≥ 0).
+     */
+    public double getPhysicsDistanceToHubMeters() {
+        double odometryDist = m_drivetrain.getState().Pose.getTranslation()
+            .getDistance(ShooterConstants.HUB_CENTER);
+        return Math.max(0.0, odometryDist - ShooterConstants.ODOMETRY_TO_RPM_TABLE_OFFSET_M);
+    }
+
+    /**
+     * Hub distance gated by turret camera visibility — returns 0.0 when no
+     * hub tag is actively seen. Use when you only want RPM set while the
+     * camera confirms a target.
+     *
+     * @return physics distance in metres, or 0.0 if no hub tag is visible.
+     */
+    public double getTurretDistanceToAprilTagMeters() {
+        if (!hasHubTarget()) return 0.0;
+        return getPhysicsDistanceToHubMeters();
+    }
+
+    /**
      * Distance to the best visible target (any tag) in <b>inches</b>.
      * Retained for {@code AlignToTag} compatibility.
      */
@@ -711,6 +739,13 @@ public class VisionSubsystem extends SubsystemBase {
                 SmartDashboard.putNumber("Vision/Turret/Pitch (deg)",   best.getPitch());
                 SmartDashboard.putNumber("Vision/Turret/Yaw (deg)",     best.getYaw());
                 SmartDashboard.putBoolean("Vision/Turret/Is Hub Tag",   isHubTag(best.getFiducialId()));
+                // Raw 3D camera-to-tag distance (no height math needed) — useful for cross-check
+                SmartDashboard.putNumber("Vision/Turret/Raw3D_Dist_m",
+                    best.getBestCameraToTarget().getTranslation().getNorm());
+                // 2D trig distance to hub tag (PhotonUtils formula, hub constants)
+                double hubDist2D = getTurretDistanceToAprilTagMeters();
+                SmartDashboard.putNumber("Vision/Turret/HubDistance2D_m", hubDist2D);
+                Logger.recordOutput("Vision/Turret/HubDistance2D_m", hubDist2D);
             }
         }
     }

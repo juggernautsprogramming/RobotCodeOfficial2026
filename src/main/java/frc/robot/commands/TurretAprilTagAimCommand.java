@@ -4,6 +4,7 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
+import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Turret.TurretSubsystem;
 import frc.robot.subsystems.Vision.VisionSubsystem;
 
@@ -15,19 +16,23 @@ import frc.robot.subsystems.Vision.VisionSubsystem;
  * (adjusted to robot frame). When the tag disappears the turret holds the
  * last known angle until a tag reappears or the command ends.
  *
+ * <p>Uses robot angular velocity feedforward to maintain lock while the robot rotates.
+ *
  * <p>Bind with {@code toggleOnTrue}.
  */
 public class TurretAprilTagAimCommand extends Command {
 
-    private final TurretSubsystem m_turret;
-    private final VisionSubsystem m_vision;
+    private final TurretSubsystem       m_turret;
+    private final VisionSubsystem       m_vision;
+    private final CommandSwerveDrivetrain m_drivetrain;
 
     private double  m_lastValidDeg = 0.0;
     private boolean m_hasTarget    = false;
 
-    public TurretAprilTagAimCommand(TurretSubsystem turret, VisionSubsystem vision) {
-        m_turret = turret;
-        m_vision = vision;
+    public TurretAprilTagAimCommand(TurretSubsystem turret, VisionSubsystem vision, CommandSwerveDrivetrain drivetrain) {
+        m_turret     = turret;
+        m_vision     = vision;
+        m_drivetrain = drivetrain;
         addRequirements(turret);
     }
 
@@ -41,26 +46,34 @@ public class TurretAprilTagAimCommand extends Command {
 
     @Override
     public void execute() {
+        // Get robot's angular velocity in rad/s (positive = CCW)
+        double robotAngularVelRadPerSec = m_drivetrain.getState().Speeds.omegaRadiansPerSecond;
+
         if (m_vision.getBestHubTarget() != null) {
             double rawYaw = m_vision.getHubTagYawDeg();
             if (!Double.isNaN(rawYaw)) {
-                // Camera yaw is already in robot-relative frame for a forward-facing camera.
-                // Clamp to ±180° for shortest-arc tracking.
-                double turretDeg = MathUtil.inputModulus(rawYaw, -180.0, 180.0);
-                m_turret.setAngleDeg(turretDeg);
+                // Camera yaw is the error from camera center to the tag.
+                // Add to current turret angle to get the new absolute robot-frame target.
+                double turretDeg = MathUtil.inputModulus(
+                    m_turret.getAngleDeg() + rawYaw, -180.0, 180.0);
+                
+                // Use velocity feedforward to counter-rotate with the robot
+                m_turret.setAngleDegWithFF(turretDeg, robotAngularVelRadPerSec);
                 m_lastValidDeg = turretDeg;
                 m_hasTarget    = true;
 
                 SmartDashboard.putNumber ("TurretTagAim/RawYawDeg",     rawYaw);
                 SmartDashboard.putNumber ("TurretTagAim/TurretTargetDeg", turretDeg);
                 SmartDashboard.putBoolean("TurretTagAim/HasTarget",     true);
+                SmartDashboard.putNumber ("TurretTagAim/RobotOmegaRadPerSec", robotAngularVelRadPerSec);
             }
         } else {
-            // Tag lost — hold last known angle
+            // Tag lost — hold last known angle with feedforward
             if (m_hasTarget) {
-                m_turret.setAngleDeg(m_lastValidDeg);
+                m_turret.setAngleDegWithFF(m_lastValidDeg, robotAngularVelRadPerSec);
             }
             SmartDashboard.putBoolean("TurretTagAim/HasTarget", false);
+            SmartDashboard.putNumber ("TurretTagAim/RobotOmegaRadPerSec", robotAngularVelRadPerSec);
         }
 
         SmartDashboard.putNumber ("TurretTagAim/TurretActualDeg", m_turret.getAngleDeg());

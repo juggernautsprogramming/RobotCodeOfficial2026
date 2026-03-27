@@ -5,27 +5,33 @@
     "data": {
       "commands": [
         {
-          "type": "path",
+          "type": "named",
           "data": {
-            "pathName": "Pose2ToHub1.5Meters"
+            "name": "StartIntake"
+          }
+        },
+        {
+          "type": "wait",
+          "data": {
+            "waitTime": 2.0
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "TurretAutoAim"
+            "name": "StopIntake"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "SnapAimAndShoot"
+            "name": "Shoot_Mid"
           }
         },
         {
-          "type": "path",
+          "type": "named",
           "data": {
-            "pathName": "Pose2ShootToClimb"
+            "name": "IdleFlywheel"
           }
         }
       ]

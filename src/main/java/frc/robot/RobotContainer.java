@@ -22,7 +22,9 @@ import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.SelectCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import java.util.Map;
 import org.littletonrobotics.junction.Logger;
 
 import frc.robot.Constants.AutoStartConstants;
@@ -53,7 +55,10 @@ import frc.robot.commands.DriveToHubAndShoot;
 import frc.robot.commands.SnapAimAndShootCommand;
 import frc.robot.commands.SnapHeadingToTag;
 import frc.robot.commands.TurretAprilTagAimCommand;
+import frc.robot.commands.TurretAutoAimCommand;
 import frc.robot.commands.TurretGimbalModeCommand;
+import frc.robot.commands.TurretGimbalModeCommand;
+
 /**
  * RobotContainer — wires together all subsystems and button bindings.
  *
@@ -65,7 +70,7 @@ import frc.robot.commands.TurretGimbalModeCommand;
  *   Right Trigger       — Turbo mode (boosts translation speed for bumps)
  *   Right Bumper        — Auto-align to AprilTag (hold)
  *   B Button            — Hold 45° field heading while driving (bump crossing, hold)
- *   X Button            — Drive to Hub + Shoot
+ *   X Button            — Aim turret to hub tag + flywheel RPM from distance (hold, idles on release)
  *   Left  Bumper        — Gyro reset
  *   A Button            — Emergency brake
  *   Y Button            — Flip 180° relative to current heading
@@ -82,7 +87,7 @@ import frc.robot.commands.TurretGimbalModeCommand;
  *   Left  Bumper  (hold) — Eject (all intake motors reverse)
  *   Right Bumper         — Reverse feeder (toggle)
  *   Left  Stick  (press) — Snap-aim-and-shoot (turret locks to hub tag → spins up → fires)
- *   Right Stick  (press) — Toggle turret auto-aim (hub track w/ SOTM + vision blend)
+ *   Right Stick  (press) — Override turret mode (AprilTag / Player / back to Odometry default)
  *   Y Button             — Zero turret (point straight ahead first)
  *
  *   D-Pad (no X held) — Press to toggle RPM for each distance:
@@ -281,7 +286,8 @@ public class RobotContainer {
                 shooterSubsystem));
 
         // ── Full shoot sequences (spin up → wait for RPM → feed → stop) ──────
-        // Each command is self-contained: set RPM, wait (≤2 s), feed all 8 balls, stop feeder.
+        // DEPRECATED: Old fixed-distance commands — replaced by SnapAimAndShoot
+        // Kept for backwards compatibility but not recommended for auto
         NamedCommands.registerCommand("Shoot_Close", makeShootCommand(ShooterConstants.PRESET_CLOSE_RPM, 8));
         NamedCommands.registerCommand("Shoot_Mid",   makeShootCommand(ShooterConstants.PRESET_MID_RPM,   8));
         NamedCommands.registerCommand("Shoot_Far",   makeShootCommand(ShooterConstants.PRESET_FAR_RPM,   8));
@@ -290,6 +296,11 @@ public class RobotContainer {
         // ── Auto Level 1 climb — add to end of any auto path ─────────────────
         NamedCommands.registerCommand("AutoClimbLevel1",
             new AutoClimbCommand(climberSubsystem).withTimeout(3.0));
+
+        // ── Eject command (reverse all intake motors) ──────────────────────────
+        NamedCommands.registerCommand("Eject",
+            Commands.runOnce(intakeAdapter::eject,
+                actuationSubsystem, uptakeSubsystem, intakeRollerSubsystem));
 
         // 6. Build auto chooser
         m_autoChooser = new SendableChooser<>();
@@ -311,6 +322,22 @@ public class RobotContainer {
         );
         turretSubsystem = new TurretSubsystem();
         visionSubsystem.setTurretSubsystem(turretSubsystem);
+
+        // ── Auto-aim and shoot with distance-based RPM (RECOMMENDED for autos) ──
+        // Uses vision to measure distance and automatically calculates optimal RPM.
+        // Sequence: align to hub tag → calculate RPM from distance → spin up → 
+        //          settle → feed → stop feeder
+        NamedCommands.registerCommand("SnapAimAndShoot",
+            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, feederSubsystem, visionSubsystem)
+                .withTimeout(5.0));
+
+        // ── Turret auto-aim commands (useful for mid-path aiming during autos) ──
+        NamedCommands.registerCommand("TurretAutoAim",
+            new TurretAutoAimCommand(drivetrain, shooterSubsystem, turretSubsystem, visionSubsystem)
+                .withTimeout(5.0));
+        NamedCommands.registerCommand("TurretAprilTagAim",
+            new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem, drivetrain)
+                .withTimeout(5.0));
 
         // Publish shot-calculator results once
         SmartDashboard.putNumber("DTHS/OptimalDist_m",    ShotCalculator.OPTIMAL_STANDOFF_M);
@@ -437,9 +464,19 @@ public class RobotContainer {
             drivetrain.applyRequest(() -> m_brake)
         );
 
-        // ── X Button: Snap-aim-and-shoot — snapshots distance once, aligns robot, fires ──
+        // ── X Button: Vision-refine turret aim + spin flywheel from live field position ──
+        // TurretAprilTagAimCommand overrides the default gimbal track while held.
+        // RPM is always set from odometry distance — no tag required.
         m_driverStick.x().whileTrue(
-            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, feederSubsystem, visionSubsystem)
+            Commands.parallel(
+                new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem, drivetrain),
+                Commands.run(() ->
+                    shooterSubsystem.setFlywheelRPMFromDistance(
+                        visionSubsystem.getPhysicsDistanceToHubMeters()),
+                    shooterSubsystem)
+            )
+        ).onFalse(
+            Commands.runOnce(shooterSubsystem::idleFlywheel, shooterSubsystem)
         );
 
         // ── Y Button: Flip 180° relative to current heading ──────────────────
@@ -497,24 +534,18 @@ public class RobotContainer {
         // X: reset modifier flag on press; standalone toggle fires on release (see bottom of D-Pad section)
         m_playerStick.x().onTrue(Commands.runOnce(() -> m_xUsedAsModifier = false));
 
-        // Left Trigger (operator): Climber up (hold), hold position on release
-        m_playerStick.leftTrigger().whileTrue(
+        // Left Trigger (operator): Climber up (hold to move)
+        m_playerStick.leftTrigger(0.1).whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(0.5), climberSubsystem)
         ).onFalse(
-            Commands.runOnce(() -> {
-                double pos = climberSubsystem.getCurrentPosition();
-                climberSubsystem.setPositionDegrees(pos * 360.0);
-            }, climberSubsystem)
+            Commands.runOnce(() -> climberSubsystem.stop(), climberSubsystem)
         );
 
-        // Right Trigger (operator): Climber down (hold), hold position on release
-        m_playerStick.rightTrigger().whileTrue(
+        // Right Trigger (operator): Climber down (hold to move)
+        m_playerStick.rightTrigger(0.1).whileTrue(
             Commands.run(() -> climberSubsystem.setPowerLevel(-0.5), climberSubsystem)
         ).onFalse(
-            Commands.runOnce(() -> {
-                double pos = climberSubsystem.getCurrentPosition();
-                climberSubsystem.setPositionDegrees(pos * 360.0);
-            }, climberSubsystem)
+            Commands.runOnce(() -> climberSubsystem.stop(), climberSubsystem)
         );
 
         // Left Bumper: Eject — all intake motors reverse (hold)
@@ -695,9 +726,10 @@ public class RobotContainer {
             }, shooterSubsystem)
         );
 
-        // ── Turret: controlled by right joystick or mode-based commands ───────
-        // Default: right joystick X drives turret open-loop in "Player" mode.
-        // Other modes (Odometry, AprilTag) are toggled via right stick button.
+        // ── Turret: always-on hub tracking + mode overrides ──────────────────
+        // Default: TurretGimbalModeCommand continuously aims at hub using
+        // Kalman-fused odometry + omega feedforward (shoot-on-the-move ready).
+        // Right stick button overrides to AprilTag or manual Player mode.
         // Y: zero turret — point straight ahead then press this
         m_playerStick.y().onTrue(
             Commands.runOnce(turretSubsystem::zeroPosition, turretSubsystem)
@@ -713,33 +745,32 @@ public class RobotContainer {
         //   "AprilTag"        — pure camera-yaw aim using hub AprilTag (no odometry blend).
         //   "Player"          — right joystick X manual control.
         m_playerStick.rightStick().toggleOnTrue(
-            Commands.defer(() -> {
-                String mode = m_turretModeChooser.getSelected();
-                if ("AprilTag".equals(mode)) {
-                    return new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem);
-                } else if ("Odometry".equals(mode)) {
-                    return new TurretGimbalModeCommand(drivetrain, turretSubsystem);
-                } else {
-                    // "Player" mode: manual joystick control
-                    return Commands.run(
+            new SelectCommand<>(
+                Map.of(
+                    "AprilTag", new TurretAprilTagAimCommand(turretSubsystem, visionSubsystem, drivetrain),
+                    "Odometry", new TurretGimbalModeCommand(drivetrain, turretSubsystem),
+                    "Player",   Commands.run(
                         () -> turretSubsystem.setOpenLoop(
+                            m_playerStick.x().getAsBoolean() ? 0.0 :
                             MathUtil.applyDeadband(
                                 m_playerStick.getRightX(),
                                 ControlDeadbands.TURRET_STICK_DEADBAND) * 0.3),
-                        turretSubsystem);
-                }
-            }, java.util.Set.of(turretSubsystem))
+                        turretSubsystem)
+                ),
+                m_turretModeChooser::getSelected
+            )
         );
 
-        // Default turret command: Player mode (manual joystick control)
-        // This only runs when no other command has the turret requirement
+        // Default turret command: player joystick control.
+        // Right-stick toggle overrides to Odometry, AprilTag, or Player mode.
         turretSubsystem.setDefaultCommand(
             Commands.run(
                 () -> turretSubsystem.setOpenLoop(
-                    MathUtil.applyDeadband(m_playerStick.getRightX(), ControlDeadbands.TURRET_STICK_DEADBAND) * 0.3
-                ),
-                turretSubsystem
-            )
+                    m_playerStick.x().getAsBoolean() ? 0.0 :
+                    MathUtil.applyDeadband(
+                        m_playerStick.getRightX(),
+                        ControlDeadbands.TURRET_STICK_DEADBAND) * 0.3),
+                turretSubsystem)
         );
 
         // ── Telemetry hook ────────────────────────────────────────────────────

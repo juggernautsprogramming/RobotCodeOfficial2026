@@ -6,19 +6,12 @@ import frc.robot.Constants.ClimberConstants;
 import frc.robot.subsystems.Climber.ClimberSubsystem;
 
 /**
- * AutoClimbCommand — drives the climber to the Level 1 rung during auto.
+ * AutoClimbCommand — moves the climber up at full power during auto.
  *
- * <p>Calls MotionMagic to smoothly reach {@link ClimberConstants#LEVEL1_CLIMB_DEGREES}.
- * Ends when the climber is within {@link ClimberConstants#CLIMB_POSITION_TOLERANCE_DEG}
- * of the target, or when the command is interrupted (e.g. auto timeout).
- *
- * <h3>Tuning</h3>
- * Manually jog the climber up to touch the Level 1 rung, read the position from
- * SmartDashboard → {@code Climber/Position_rot}, convert to degrees
- * ({@code pos_rot × 360}), and update {@link ClimberConstants#LEVEL1_CLIMB_DEGREES}.
+ * <p>Runs the climber at fixed power level (0.5) until timeout or interrupted.
  *
  * <h3>PathPlanner usage</h3>
- * Registered as {@code "AutoClimbLevel1"} in RobotContainer named commands.
+ * Registered as {@code "AutoClimbUp"} in RobotContainer named commands.
  * Add it at the end of your auto path after the last shot sequence.
  */
 public class AutoClimbCommand extends Command {
@@ -32,24 +25,24 @@ public class AutoClimbCommand extends Command {
 
     @Override
     public void initialize() {
-        m_climber.setPositionDegrees(ClimberConstants.LEVEL1_CLIMB_DEGREES);
+        m_climber.setPowerLevel(0.5);
         SmartDashboard.putString("AutoClimb/Status", "CLIMBING");
     }
 
     @Override
     public void execute() {
-        SmartDashboard.putBoolean("AutoClimb/AtTarget",
-            m_climber.isAtPosition(ClimberConstants.LEVEL1_CLIMB_DEGREES));
+        SmartDashboard.putNumber("AutoClimb/Position_rot", m_climber.getCurrentPosition());
     }
 
     @Override
     public boolean isFinished() {
-        return m_climber.isAtPosition(ClimberConstants.LEVEL1_CLIMB_DEGREES);
+        return Math.abs(m_climber.getCurrentPosition() - ClimberConstants.UP_POSITION_ROTATIONS)
+            < ClimberConstants.POSITION_TOLERANCE_ROTATIONS;
     }
 
     @Override
     public void end(boolean interrupted) {
-        // Hold position via MotionMagic — don't stop the motor
+        m_climber.stop();
         SmartDashboard.putString("AutoClimb/Status", interrupted ? "INTERRUPTED" : "DONE");
     }
 }

@@ -3,25 +3,25 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 1.976,
-        "y": 4.002607142857143
+        "x": 3.4758571428571425,
+        "y": 4.018803571428571
       },
       "prevControl": null,
       "nextControl": {
-        "x": 2.0986472054001197,
-        "y": 4.279034758099027
+        "x": 4.337699522391103,
+        "y": 4.078248290166861
       },
-      "isLocked": true,
+      "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.6397843641206706,
-        "y": 3.187263152169661
+        "x": 1.5970714285714283,
+        "y": 3.0956071428571432
       },
       "prevControl": {
-        "x": 1.7184375561376208,
-        "y": 3.609137647524068
+        "x": 1.35153362047779,
+        "y": 3.03243131273789
       },
       "nextControl": null,
       "isLocked": false,
@@ -31,7 +31,14 @@
   "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
-  "eventMarkers": [],
+  "eventMarkers": [
+    {
+      "name": "SnapAimAndShoot",
+      "waypointRelativePos": 0.38666666666666677,
+      "endWaypointRelativePos": null,
+      "command": null
+    }
+  ],
   "globalConstraints": {
     "maxVelocity": 3.0,
     "maxAcceleration": 3.0,

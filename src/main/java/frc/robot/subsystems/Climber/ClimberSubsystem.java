@@ -2,11 +2,8 @@ package frc.robot.subsystems.Climber;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.Follower;
-import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -14,25 +11,17 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.ClimberConstants;
 
 /**
- * ClimberSubsystem — dual-motor elevator with gravity compensation.
+ * ClimberSubsystem — single motor climber with pure duty cycle control.
  *
- * <h3>Deprecation fix</h3>
- * Removed unused {@code import com.ctre.phoenix6.StatusCode}.
- * Replaced {@code new TalonFX(id, "ChassisCAN")} with
- * {@code new TalonFX(id, new CANBus("ChassisCAN"))}.
+ * Uses simple duty cycle commands (hold down triggers to move manually).
  */
 public class ClimberSubsystem extends SubsystemBase {
 
-    private final TalonFX leaderMotor;
-    private final TalonFX followerMotor;
-
-    private final MotionMagicVoltage motionMagicRequest =
-        new MotionMagicVoltage(0).withSlot(0);
+    private final TalonFX motor;
 
     public ClimberSubsystem() {
         CANBus chassisCAN = new CANBus(ClimberConstants.CAN_BUS);
-        leaderMotor   = new TalonFX(ClimberConstants.LEADER_ID,   chassisCAN);
-        followerMotor = new TalonFX(ClimberConstants.FOLLOWER_ID, chassisCAN);
+        motor = new TalonFX(ClimberConstants.MOTOR_ID, chassisCAN);
 
         TalonFXConfiguration config = new TalonFXConfiguration();
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
@@ -41,48 +30,44 @@ public class ClimberSubsystem extends SubsystemBase {
         config.CurrentLimits.StatorCurrentLimit       = ClimberConstants.STATOR_LIMIT_AMPS;
         config.CurrentLimits.StatorCurrentLimitEnable = true;
 
-        config.MotionMagic.MotionMagicCruiseVelocity = ClimberConstants.CRUISE_VELOCITY;
-        config.MotionMagic.MotionMagicAcceleration   = ClimberConstants.ACCELERATION;
+        // Hardware-enforced soft limits — stops motion before mechanism damage
+        config.SoftwareLimitSwitch.ForwardSoftLimitEnable    = true;
+        config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = ClimberConstants.UP_POSITION_ROTATIONS;
+        config.SoftwareLimitSwitch.ReverseSoftLimitEnable    = true;
+        config.SoftwareLimitSwitch.ReverseSoftLimitThreshold = ClimberConstants.DOWN_POSITION_ROTATIONS;
 
-        config.Slot0.kP = ClimberConstants.kP;
-        config.Slot0.kI = ClimberConstants.kI;
-        config.Slot0.kD = ClimberConstants.kD;
-        config.Slot0.kG = ClimberConstants.kG;
-
-        leaderMotor.getConfigurator().apply(config);
-        followerMotor.getConfigurator().apply(config);
-
-        followerMotor.setControl(new Follower(ClimberConstants.LEADER_ID, MotorAlignmentValue.Opposed));
-        leaderMotor.setPosition(0);
-    }
-
-    public void setPositionDegrees(double degrees) {
-        double rotations = (degrees / 360.0) * ClimberConstants.GEAR_RATIO;
-        leaderMotor.setControl(motionMagicRequest.withPosition(rotations));
-    }
-
-    public void setPowerLevel(double power) { leaderMotor.set(power); }
-
-    public void stopMotors() { leaderMotor.stopMotor(); }
-
-    public double getCurrentPosition() {
-        return leaderMotor.getPosition().getValueAsDouble();
+        motor.getConfigurator().apply(config);
+        motor.setPosition(0);
     }
 
     /**
-     * Returns true when the climber is within tolerance of the given target.
-     * @param targetDeg target position in degrees (same units as {@link #setPositionDegrees})
+     * Set motor power directly using duty cycle.
+     * Range: -1.0 (down) to 1.0 (up)
+     * Hardware soft limits enforce UP_POSITION_ROTATIONS and DOWN_POSITION_ROTATIONS.
      */
-    public boolean isAtPosition(double targetDeg) {
-        double targetRot  = (targetDeg / 360.0) * ClimberConstants.GEAR_RATIO;
-        double currentRot = getCurrentPosition();
-        return Math.abs(currentRot - targetRot)
-            < (ClimberConstants.CLIMB_POSITION_TOLERANCE_DEG / 360.0);
+    public void setPowerLevel(double power) {
+        motor.set(power);
+    }
+
+    /**
+     * Stop the motor.
+     */
+    public void stop() {
+        motor.set(0);
+    }
+
+    /**
+     * Get current motor position in rotations.
+     */
+    public double getCurrentPosition() {
+        return motor.getPosition().getValueAsDouble();
     }
 
     @Override
     public void periodic() {
-        SmartDashboard.putNumber ("Climber/Position_rot", getCurrentPosition());
-        SmartDashboard.putNumber ("Climber/Position_deg", getCurrentPosition() * 360.0);
+        double posRot = getCurrentPosition();
+        SmartDashboard.putNumber("Climber/Position_rot", posRot);
+        SmartDashboard.putNumber("Climber/Position_deg", posRot * 360.0);
+        SmartDashboard.putNumber("Climber/Velocity_rps", motor.getVelocity().getValueAsDouble());
     }
 }

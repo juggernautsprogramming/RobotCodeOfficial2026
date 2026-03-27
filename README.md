@@ -6,12 +6,52 @@ Type these names exactly (case-sensitive) into PathPlanner event markers.
 
 ---
 
+### Turret
+
+| Command | What it does | Notes |
+|---|---|---|
+| `TurretAutoAim` | Continuously aims turret using odometry + vision blend | Uses FireControlSolver; provides velocity compensation |
+| `TurretAprilTagAim` | Aims turret purely from AprilTag camera yaw | No odometry; good when hub tag is visible |
+
+---
+
+### Shooting (Recommended)
+
+| Command | What it does |
+|---|---|
+| `SnapAimAndShoot` | ⭐ **RECOMMENDED** — Aligns to hub tag, calculates RPM from distance, spins up, and shoots |
+
+**How it works:**
+1. Robot aligns to hub AprilTag
+2. Measures distance to hub
+3. Calculates optimal RPM from distance
+4. Spins flywheel to calculated RPM
+5. Waits for RPM on target
+6. Feeds all balls
+7. Complete!
+
+---
+
+### Shooting (Legacy - Fixed Distance)
+
+| Command | Distance | RPM | Notes |
+|---|---|---|---|
+| `Shoot_Close` | 1.5 m | 2440 | DEPRECATED - Use SnapAimAndShoot instead |
+| `Shoot_Mid` | 2.5 m | 2610 | DEPRECATED - Use SnapAimAndShoot instead |
+| `Shoot_Far` | 4.0 m | 3000 | DEPRECATED - Use SnapAimAndShoot instead |
+| `Shoot_VFar` | 5.5 m | 3600 | DEPRECATED - Use SnapAimAndShoot instead |
+
+**Note:** These are kept for backwards compatibility but are not recommended. Use `SnapAimAndShoot` for distance-based auto RPM calculation.
+
+---
+
 ### Intake
 
 | Command | What it does |
 |---|---|
 | `StartIntake` | Deploys arm + spins all intake rollers |
 | `StopIntake` | Retracts arm + stops all rollers |
+| `Eject` | Reverses all intake motors to eject balls |
 
 ---
 
@@ -27,7 +67,7 @@ Type these names exactly (case-sensitive) into PathPlanner event markers.
 ### Flywheel Spin-Up Presets
 
 Instant commands — flywheel stays at speed until `IdleFlywheel` is called.
-Pair with `StartFeeder` / `StopFeeder` if you want manual feed control.
+Pair with `StartFeeder` / `StopFeeder` if you want manual feed control (usually not needed with `SnapAimAndShoot`).
 
 | Command | Distance | RPM |
 |---|---|---|
@@ -40,17 +80,11 @@ Pair with `StartFeeder` / `StopFeeder` if you want manual feed control.
 
 ---
 
-### Full Shoot Sequences
+### Climbing
 
-Self-contained — automatically spins up flywheel, waits for target RPM (≤ 2 s), runs feeder for 0.5 s, then stops feeder.
-Flywheel keeps spinning after; follow with `IdleFlywheel` at the end of your auto.
-
-| Command | Distance | RPM |
+| Command | What it does | Notes |
 |---|---|---|
-| `Shoot_Close` | 1.5 m | 2440 |
-| `Shoot_Mid` | 2.5 m | 2610 |
-| `Shoot_Far` | 4.0 m | 3000 |
-| `Shoot_VFar` | 5.5 m | 3600 |
+| `AutoClimbLevel1` | Climbs to Level 1 rung | 3s timeout; add at end of auto path |
 
 ---
 

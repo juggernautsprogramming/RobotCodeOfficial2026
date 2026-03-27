@@ -5,27 +5,15 @@
     "data": {
       "commands": [
         {
-          "type": "path",
+          "type": "named",
           "data": {
-            "pathName": "Pose2ToHub1.5Meters"
+            "name": "Shoot_Mid"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "TurretAutoAim"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": "SnapAimAndShoot"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "Pose2ShootToClimb"
+            "name": "IdleFlywheel"
           }
         }
       ]
