@@ -25,7 +25,7 @@ public class AutoClimbCommand extends Command {
 
     @Override
     public void initialize() {
-        m_climber.setPowerLevel(0.5);
+        m_climber.setPowerLevel(-0.4);
         SmartDashboard.putString("AutoClimb/Status", "CLIMBING");
     }
 
@@ -36,7 +36,7 @@ public class AutoClimbCommand extends Command {
 
     @Override
     public boolean isFinished() {
-        return Math.abs(m_climber.getCurrentPosition() - ClimberConstants.UP_POSITION_ROTATIONS)
+        return Math.abs(m_climber.getCurrentPosition() - ClimberConstants.DOWN_POSITION_ROTATIONS)
             < ClimberConstants.POSITION_TOLERANCE_ROTATIONS;
     }
 

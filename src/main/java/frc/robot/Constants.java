@@ -348,7 +348,7 @@ public final class Constants {
          * (~0.20 m) + tape_to_physics_correction (0.347 m) ≈ 1.05 m.
          * Tune this value if shots still over/undershoot after distance is correct.
          */
-        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 0.95;
+        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 1.07;
 
         // ── Fixed hood angle ──────────────────────────────────────────────────
         /**
@@ -464,8 +464,8 @@ public final class Constants {
         static {
             // Physics distances = tape distance − DIST_CORRECTION (0.347 m)
             // RPM anchors match the confirmed entries in RPM_DISTANCE_TABLE (★ confirmed on field).
-            double[] x = { 1.153, 2.153, 3.653, 5.153 };
-            double[] y = { 1850.0, 2200.0, 2680.0, 3300.0 };
+            double[] x = { 0.953,1.153, 2.153, 3.653, 5.153 };
+            double[] y = { 2000,2100.0, 2400.0, 2880.0, 3500.0 };
             int n = x.length;
             double[] h     = new double[n - 1];
             double[] delta = new double[n - 1];
@@ -659,7 +659,7 @@ public final class Constants {
 
         // ── Climber Positions (in motor rotations) ─────────────
         
-        public static final double DOWN_POSITION_ROTATIONS = -29.4;  // your DOWN value
+        public static final double DOWN_POSITION_ROTATIONS = -40.4;  // your DOWN value
         public static final double UP_POSITION_ROTATIONS = 0;     // your UP value
 
         /** Position tolerance for "at target" check (rotations). */
