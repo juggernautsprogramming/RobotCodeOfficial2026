@@ -9,6 +9,9 @@ import frc.robot.subsystems.CommandSwerveDrivetrain; // Adjust based on your dri
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 public class AlignToTag extends Command {
+
+    // Tag IDs shared with SnapAimAndShootCommand — defined in VisionConstants.ALIGN_TAG_IDS
+
     private final CommandSwerveDrivetrain m_drivetrain;
     private final VisionSubsystem m_vision;
     private final DoubleSupplier m_translationX;
@@ -56,13 +59,12 @@ public class AlignToTag extends Command {
     public void execute() {
         double rotationSpeed = 0;
 
-        if (m_vision.hasValidTarget()) {
-            // Use the Subsystem's method which already has the PID logic
-            // and add a small 'look ahead' by increasing the P gain if needed
-            rotationSpeed = m_vision.getAlignmentRotationSpeed();
+        var target = m_vision.getBestTarget();
+        if (target != null && isAlignTag(target.getFiducialId())) {
+            rotationSpeed = Math.max(-3.0, Math.min(3.0,
+                m_turnPID.calculate(target.getYaw(), 0.0)));
 
-            // If the robot is already rotating fast, dampen the vision 
-            // to prevent overshooting the tag.
+            // Dampen if already rotating fast to prevent overshoot
             double currentRotVelocity = m_drivetrain.getState().Speeds.omegaRadiansPerSecond;
             if (Math.abs(currentRotVelocity) > 2.0) {
                 rotationSpeed *= 0.5;
@@ -85,8 +87,14 @@ public class AlignToTag extends Command {
     }
     @Override
     public boolean isFinished() {
-        // If we've been running for 5 seconds and haven't hit the target, 
-        // something is wrong (camera blocked, etc). Exit for safety.
-        return false; 
+        return false;
+    }
+
+    /** Returns true if the given tag ID is in VisionConstants.ALIGN_TAG_IDS. */
+    public static boolean isAlignTag(int id) {
+        for (int alignId : frc.robot.Constants.VisionConstants.ALIGN_TAG_IDS) {
+            if (id == alignId) return true;
+        }
+        return false;
     }
 }

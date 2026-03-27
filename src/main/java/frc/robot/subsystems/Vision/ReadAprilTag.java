@@ -43,6 +43,9 @@ public class ReadAprilTag {
     private final PhotonPoseEstimator m_poseEstimator;
     private Transform3d               m_robotToCam;
 
+    /** When false, the pose estimator is skipped and only 2D target data is collected. */
+    private boolean m_use3D = true;
+
     /** Most recent pipeline result — used by accessors. */
     private PhotonPipelineResult m_latestResult = null;
 
@@ -94,14 +97,15 @@ public class ReadAprilTag {
         for (PhotonPipelineResult result : unread) {
             if (!result.hasTargets()) continue;
 
-            // Hard ambiguity gate for single-tag frames before running PnP solve
-            if (result.getTargets().size() == 1
-                    && result.getBestTarget().getPoseAmbiguity() > kAmbiguityThreshold) {
-                continue;
+            if (m_use3D) {
+                // Hard ambiguity gate for single-tag frames before running PnP solve
+                if (result.getTargets().size() == 1
+                        && result.getBestTarget().getPoseAmbiguity() > kAmbiguityThreshold) {
+                    continue;
+                }
+                Optional<EstimatedRobotPose> estimate = m_poseEstimator.update(result);
+                estimate.ifPresent(m_newEstimates::add);
             }
-
-            Optional<EstimatedRobotPose> estimate = m_poseEstimator.update(result);
-            estimate.ifPresent(m_newEstimates::add);
         }
 
         // Keep the chronologically latest result for accessors (distance, ambiguity, etc.)
@@ -155,6 +159,13 @@ public class ReadAprilTag {
 
     /** Current robot-to-camera transform (updated each loop for turret cameras). */
     public Transform3d getRobotToCam() { return m_robotToCam; }
+
+    /**
+     * Set to {@code false} to disable 3D pose estimation and only collect 2D
+     * target data (yaw, pitch, fiducial ID). Use for cameras where only
+     * distance/yaw is needed, not field-relative pose (e.g. turret camera).
+     */
+    public void setUse3D(boolean use3D) { m_use3D = use3D; }
 
     /**
      * Updates the robot-to-camera transform used by the pose estimator.

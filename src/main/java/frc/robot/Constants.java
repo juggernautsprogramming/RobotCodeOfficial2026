@@ -155,18 +155,18 @@ public final class Constants {
             // Left camera — faces left (zθ=270° CW → 90° CCW in WPILib), tilts up 30°
             CAMERA_LEFT, new Transform3d(
                 new Translation3d(
-                    Units.inchesToMeters(-13.747),
-                    Units.inchesToMeters(-10.489),
+                    Units.inchesToMeters(-13.747),//y
+                    Units.inchesToMeters(10.489),//x
                     Units.inchesToMeters(25.880)),
                 new Rotation3d(0,
                     Units.degreesToRadians(-30),  // upward tilt: negative pitch in WPILib convention
-                    Units.degreesToRadians(270))   // facing left (270° in WPILib = -90° = left)
+                    Units.degreesToRadians(90))   // facing left (270° in WPILib = -90° = left)
             ),
             // Back camera — faces backward (zθ=180°), tilts up 30°
             CAMERA_BACK, new Transform3d(
                 new Translation3d(
                     Units.inchesToMeters(-10.511),
-                    Units.inchesToMeters(-10.872),
+                    Units.inchesToMeters(10.872),
                     Units.inchesToMeters(25.880)),
                 new Rotation3d(
                     0,
@@ -190,7 +190,7 @@ public final class Constants {
                     Units.inchesToMeters(5.735),   // x: forward from turret pivot
                     Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left in WPILib)
                     Units.inchesToMeters(25.387)), // z: total height above robot centre
-                new Rotation3d(0, Units.degreesToRadians(23), 0) 
+                new Rotation3d(0, Units.degreesToRadians(0), 0) 
             )
         );
 
@@ -210,7 +210,7 @@ public final class Constants {
                 Units.inchesToMeters(5.735),   // x: forward from turret pivot
                 Units.inchesToMeters(5.341),   // y: lateral from turret pivot (+y = left)
                 Units.inchesToMeters(25.387)), // z: total height above robot centre
-            new Rotation3d(0, Units.degreesToRadians(-67), 0) // 67° upward pitch; yaw added dynamically
+            new Rotation3d(0, Units.degreesToRadians(22), 0) // 67° upward pitch; yaw added dynamically
         );
 
         /** Fallback transform used if a camera name is not in kCameraOffsets. */
@@ -251,8 +251,19 @@ public final class Constants {
         public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
         public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(12.9);
         public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(20);
-        /** Height of the hub AprilTag center above the floor (meters). */
-        public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(24.0);
+        /** Height of the hub AprilTag center above the floor (meters).
+         *  Matches ShooterConstants.HUB_TARGET_HEIGHT_METERS — update both if the tag moves. */
+        public static final double HUB_TAG_HEIGHT_METERS = 2.64;
+
+        /** AprilTag IDs used for robot-rotation alignment (AlignToTag + SnapAimAndShootCommand). */
+        public static final int[] ALIGN_TAG_IDS = {26, 10, 21, 5, 18, 2, 20, 4};
+
+        // ── Turret camera geometry (for PhotonUtils hub distance calculation) ──
+        /** Height of the turret camera lens above the floor (meters).
+         *  Derived from kTurretCamTurretFrame z-translation. */
+        public static final double TURRET_CAM_HEIGHT_METERS = Units.inchesToMeters(25.387);
+        /** Turret camera upward pitch used with PhotonUtils (radians, positive = looking up). */
+        public static final double TURRET_CAM_PITCH_RADIANS  = Units.degreesToRadians(62.0);
 
         private VisionConstants() {}
     }
@@ -319,7 +330,7 @@ public final class Constants {
         public static final double HUB_TARGET_HEIGHT_METERS = 2.64;
 
         /** AprilTag IDs attached to the hub. */
-        public static final int[] HUB_APRIL_TAG_IDS = {8, 9, 11, 19};
+        public static final int[] HUB_APRIL_TAG_IDS = {26,21,18,20,10,5,2,4};
 
         // ── Shooter mechanism geometry ────────────────────────────────────────
         /** Height of the game-piece exit point above the floor (meters). */
@@ -327,6 +338,17 @@ public final class Constants {
 
         /** Horizontal distance from robot center to shooter exit (meters). */
         public static final double SHOOTER_X_OFFSET_METERS = 0.20;
+
+        /**
+         * Offset subtracted from odometry-based robot-centre→hub-centre distance
+         * before RPM interpolation, converting it to the "shooter-exit→hub-face"
+         * coordinate space the RPM table was calibrated in.
+         *
+         * <p>Breakdown: robot_centre_to_bumper (~0.50 m) + hub_face_to_hub_centre
+         * (~0.20 m) + tape_to_physics_correction (0.347 m) ≈ 1.05 m.
+         * Tune this value if shots still over/undershoot after distance is correct.
+         */
+        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 0.95;
 
         // ── Fixed hood angle ──────────────────────────────────────────────────
         /**
@@ -373,10 +395,9 @@ public final class Constants {
         public static final double FLYWHEEL_STATOR_LIMIT_AMPS = 60.0;
 
         // ── Flywheel PID / feedforward (VelocityTorqueCurrentFOC, Phoenix Pro) ──
-        // Gains are in Amps. Derived from SysId voltage values ÷ Kt (~0.0181 for Kraken/Falcon).
-        public static final double FLYWHEEL_kP = 25.0;   // Kept at 25.0 for good RPM tracking
-        public static final double FLYWHEEL_kI = 1.2;    // Reduced from 1.2 to avoid overshoot on distance changes
-        public static final double FLYWHEEL_kD = 0.1;    // Added small D term for transient damping
+        public static final double FLYWHEEL_kP = 6.0;
+        public static final double FLYWHEEL_kI = 0.0;
+        public static final double FLYWHEEL_kD = 0.0;
         public static final double FLYWHEEL_kS = 12.426;
         public static final double FLYWHEEL_kV = 0.1565;
         public static final double FLYWHEEL_kA = 0.0;
@@ -414,15 +435,14 @@ public final class Constants {
         // Tape distances (bumper→face) shown in comments for field reference.
         // The _DIST_M values are physics coordinates (shooter-exit→hub-center).
         // When driving to a preset, command: bumper→face = _DIST_M + DIST_MEAS_CORRECTION_M
-        // ── Named RPM presets (used by PathPlanner auto named commands) ─────────
-        public static final double PRESET_CLOSE_RPM    = 1850.0; // ★ confirmed
-        public static final double PRESET_CLOSE_DIST_M = 1.153;  // tape: 1.5 m
-        public static final double PRESET_MID_RPM      = 2200.0; // ★ confirmed (updated from 2081)
-        public static final double PRESET_MID_DIST_M   = 2.153;  // tape: 2.5 m
-        public static final double PRESET_FAR_RPM      = 2680.0; // ★ confirmed (updated from 2570)
-        public static final double PRESET_FAR_DIST_M   = 3.653;  // tape: 4.0 m
+        public static final double PRESET_CLOSE_RPM    = 1850.0;
+        public static final double PRESET_CLOSE_DIST_M = 1.153; // tape: 1.5 m  ★ confirmed
+        public static final double PRESET_MID_RPM      = 2081.0;
+        public static final double PRESET_MID_DIST_M   = 2.153; // tape: 2.5 m  ★ confirmed
+        public static final double PRESET_FAR_RPM      = 2570.0;
+        public static final double PRESET_FAR_DIST_M   = 3.653; // tape: 4.0 m  ★ confirmed
         public static final double PRESET_VFAR_RPM     = 3649.0; // ⚠ unconfirmed — measure on field
-        public static final double PRESET_VFAR_DIST_M  = 5.153;  // tape: 5.5 m  ⚠ unconfirmed
+        public static final double PRESET_VFAR_DIST_M  = 5.153; // tape: 5.5 m  ⚠ unconfirmed
 
         // ── D-Pad operator distance presets (used by RobotContainer D-pad bindings) ──
         // RPM is interpolated live from RPM_DISTANCE_TABLE via setFlywheelRPMFromDistance().
@@ -435,28 +455,65 @@ public final class Constants {
         public static final double PRESET_5M_DIST_M   = 4.653; // tape: 5.0 m
 
 
+        // ── Monotone cubic spline — built from confirmed RPM_DISTANCE_TABLE anchors ──
+        // Anchor RPMs match the ★-confirmed entries in RPM_DISTANCE_TABLE above.
+        // Built once at class-load; no allocations at runtime.
+        private static final double[] SPLINE_X;
+        private static final double[] SPLINE_Y;
+        private static final double[] SPLINE_M; // tangent slopes at each knot
+        static {
+            // Physics distances = tape distance − DIST_CORRECTION (0.347 m)
+            // RPM anchors match the confirmed entries in RPM_DISTANCE_TABLE (★ confirmed on field).
+            double[] x = { 1.153, 2.153, 3.653, 5.153 };
+            double[] y = { 1850.0, 2200.0, 2680.0, 3300.0 };
+            int n = x.length;
+            double[] h     = new double[n - 1];
+            double[] delta = new double[n - 1];
+            double[] m     = new double[n];
+            for (int i = 0; i < n - 1; i++) {
+                h[i]     = x[i + 1] - x[i];
+                delta[i] = (y[i + 1] - y[i]) / h[i];
+            }
+            // End-point slopes = first/last segment slope
+            m[0]     = delta[0];
+            m[n - 1] = delta[n - 2];
+            for (int i = 1; i < n - 1; i++) m[i] = (delta[i - 1] + delta[i]) / 2.0;
+            // Monotonicity enforcement (Steffen-style slope clamping)
+            for (int i = 0; i < n - 1; i++) {
+                if (Math.abs(delta[i]) < 1e-10) { m[i] = 0; m[i + 1] = 0; continue; }
+                double a = m[i] / delta[i], b = m[i + 1] / delta[i];
+                if (a < 0 || b < 0) { m[i] = 0; m[i + 1] = 0; continue; }
+                double sq = a * a + b * b;
+                if (sq > 9) { double tau = 3.0 / Math.sqrt(sq); m[i] *= tau; m[i + 1] *= tau; }
+            }
+            SPLINE_X = x;
+            SPLINE_Y = y;
+            SPLINE_M = m;
+        }
+
         /**
-         * Interpolates target RPM from RPM_DISTANCE_TABLE using linear
-         * interpolation between the two nearest rows.
+         * Interpolates target RPM using a monotone cubic spline through the 3
+         * field-confirmed anchor points. Matches the {@code interpRPM()} function
+         * in {@code shooter_calculator.html} exactly.
          *
-         * This is the ONLY correct way to get a target RPM in ShotCalculator.
-         * Do not call the physics v₀ model for RPM — it assumes η = 0.85
-         * which is wrong for this mechanism (η_real ≈ 0.42).
+         * Outside the anchor range the spline extrapolates linearly using the
+         * end-point tangent slope (same behaviour as the HTML).
          *
          * @param distMeters horizontal distance from shooter exit to hub center
-         * @return target flywheel RPM, clamped to table bounds
+         * @return target flywheel RPM
          */
         public static double interpolateRPM(double distMeters) {
-            double[][] tbl = RPM_DISTANCE_TABLE;
-            if (distMeters <= tbl[0][0])              return tbl[0][1];
-            if (distMeters >= tbl[tbl.length - 1][0]) return tbl[tbl.length - 1][1];
-            for (int i = 0; i < tbl.length - 1; i++) {
-                if (distMeters >= tbl[i][0] && distMeters <= tbl[i + 1][0]) {
-                    double t = (distMeters - tbl[i][0]) / (tbl[i + 1][0] - tbl[i][0]);
-                    return tbl[i][1] + t * (tbl[i + 1][1] - tbl[i][1]);
-                }
-            }
-            return tbl[tbl.length - 1][1];
+            double[] x = SPLINE_X, y = SPLINE_Y, m = SPLINE_M;
+            int n = x.length;
+            if (distMeters <= x[0])      return y[0]     + m[0]     * (distMeters - x[0]);
+            if (distMeters >= x[n - 1]) return y[n - 1] + m[n - 1] * (distMeters - x[n - 1]);
+            int lo = 0, hi = n - 1;
+            while (hi - lo > 1) { int mid = (lo + hi) >> 1; if (x[mid] <= distMeters) lo = mid; else hi = mid; }
+            double seg = x[lo + 1] - x[lo];
+            double t = (distMeters - x[lo]) / seg;
+            double t2 = t * t, t3 = t2 * t;
+            return (2*t3 - 3*t2 + 1)*y[lo]     + (t3 - 2*t2 + t)*seg*m[lo]
+                 + (-2*t3 + 3*t2)*y[lo + 1] + (t3 - t2)*seg*m[lo + 1];
         }
 
         // ── Pivot (hood) hardware — FIXED, no motion needed ──────────────────
@@ -579,8 +636,7 @@ public final class Constants {
     public static final class ClimberConstants {
 
         // ── Hardware ─────────────────────────────────────────────────────────
-        public static final int    LEADER_ID   = 15;
-        public static final int    FOLLOWER_ID = 16;
+        public static final int    MOTOR_ID   = 31;
         public static final String CAN_BUS     = "ChassisCAN";
 
         // ── Mechanism ────────────────────────────────────────────────────────
@@ -601,21 +657,13 @@ public final class Constants {
         // ── Stator current limit ──────────────────────────────────────────────
         public static final double STATOR_LIMIT_AMPS = 40.0;
 
-        /**
-         * Motor encoder degrees for the Level 1 rung position.
-         *
-         * ── How to tune ──────────────────────────────────────────────────────
-         * 1. Manually jog the climber up until the hooks contact the Level 1 rung.
-         * 2. Read the current position from SmartDashboard → Climber/Position_rot.
-         * 3. Multiply by 360 to convert rotations → degrees.
-         * 4. Replace the placeholder below with that value.
-         *
-         * The Level 1 rung is 27 in (0.686 m) above the carpet.
-         */
-        public static final double LEVEL1_CLIMB_DEGREES = 720.0; // ⚠ placeholder — tune on robot
+        // ── Climber Positions (in motor rotations) ─────────────
+        
+        public static final double DOWN_POSITION_ROTATIONS = -29.4;  // your DOWN value
+        public static final double UP_POSITION_ROTATIONS = 0;     // your UP value
 
-        /** Position tolerance for "at target" check (degrees). */
-        public static final double CLIMB_POSITION_TOLERANCE_DEG = 18.0; // ≈ 0.05 rotations
+        /** Position tolerance for "at target" check (rotations). */
+        public static final double POSITION_TOLERANCE_ROTATIONS = 0.05; // ≈ 18 degrees
 
         private ClimberConstants() {}
     }
@@ -684,14 +732,18 @@ public final class Constants {
         /** Target position (rotations) when the arm is fully deployed. */
         public static final double DEPLOYED_ROTATIONS = 11.33;
         /** Target position (rotations) when the arm is fully stowed. */
-        public static final double STOWED_ROTATIONS   = 0.0;
+        public static final double STOWED_ROTATIONS   = 4.0;
         /** Bar stops spinning when arm is within this many rotations of stow. */
         public static final double STOW_TOLERANCE     = 0.5;
 
-        /** Duty-cycle power for the uptake roller (0–1). */
-        public static final double ROLLER_POWER = 0.65;
-        /** Duty-cycle power for the intake bar/rod motors (0–1). */
-        public static final double BAR_POWER    = 0.7;
+        /** Duty-cycle power for the uptake roller when ejecting (0–1). */
+        public static final double ROLLER_POWER    = 0.65;
+        /** Duty-cycle power for the intake bar/rod motors when ejecting (0–1). */
+        public static final double BAR_POWER       = 0.9;
+        /** Duty-cycle power for the uptake roller when intaking (0–1). */
+        public static final double ROLLER_POWER_IN = 0.05;
+        /** Duty-cycle power for the intake bar/rod motors when intaking (0–1). */
+        public static final double BAR_POWER_IN    = 0.8;
 
         private IntakeConstants() {}
     }

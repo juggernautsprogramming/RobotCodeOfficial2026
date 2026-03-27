@@ -437,9 +437,9 @@ public class RobotContainer {
             drivetrain.applyRequest(() -> m_brake)
         );
 
-        // ── X Button: Drive to Hub + Shoot ───────────────────────────────────
+        // ── X Button: Snap-aim-and-shoot — snapshots distance once, aligns robot, fires ──
         m_driverStick.x().whileTrue(
-            new DriveToHubAndShoot(drivetrain, shooterSubsystem)
+            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, feederSubsystem, visionSubsystem)
         );
 
         // ── Y Button: Flip 180° relative to current heading ──────────────────
@@ -705,7 +705,7 @@ public class RobotContainer {
 
         // Left Stick (LS/L3): Snap-aim-and-shoot — turret locks to hub tag, spins up, fires one ball
         m_playerStick.leftStick().whileTrue(
-            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, turretSubsystem, feederSubsystem, visionSubsystem)
+            new SnapAimAndShootCommand(drivetrain, shooterSubsystem, feederSubsystem, visionSubsystem)
         );
 
         // Right Stick (RS/R3): Toggle turret auto-aim or player control based on mode selected in Elastic.

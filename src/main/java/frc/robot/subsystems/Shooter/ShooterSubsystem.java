@@ -165,14 +165,13 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     /**
-     * Look up the target RPM from the distance→RPM interpolation table and
-     * command the flywheel to that speed. Call this with the camera-measured
-     * distance to the hub each loop while the robot is aiming.
+     * Interpolate target RPM from the monotone cubic spline (matches
+     * shooter_calculator.html) and command the flywheel to that speed.
      *
      * @param distanceMeters Horizontal distance from shooter exit to hub (metres).
      */
     public void setFlywheelRPMFromDistance(double distanceMeters) {
-        double rpm = m_rpmTable.get(distanceMeters);
+        double rpm = ShooterConstants.interpolateRPM(distanceMeters);
         setFlywheelRPM(rpm);
     }
 

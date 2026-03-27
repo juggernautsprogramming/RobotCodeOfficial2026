@@ -122,6 +122,12 @@ public class VisionSubsystem extends SubsystemBase {
     /** Discard measurements older than this many seconds (stale-frame guard). */
     private static final double VISION_STALENESS_S = 0.500;
 
+    /** Valid range for hub distance readings. Outliers outside this are ignored. */
+    private static final double HUB_DIST_MIN_M = 0.3;
+    private static final double HUB_DIST_MAX_M = 8.0;
+    /** Maximum change in hub distance allowed per loop (metres). Larger jumps are ignored. */
+    private static final double HUB_DIST_MAX_JUMP_M = 0.75;
+
     // ── Std-dev trust model ───────────────────────────────────────────────────
 
     /** Minimum XY std-dev (metres) at zero distance, zero ambiguity, multi-tag. */
@@ -173,6 +179,8 @@ public class VisionSubsystem extends SubsystemBase {
     private double m_hubDistMeters          = 0.0;
     /** FPGA timestamp of the most recently accepted hub measurement. */
     private double m_lastHubResultTimestamp = 0.0;
+    /** Index into m_sensors for the camera that produced m_bestHubTarget. -1 = unknown. */
+    private int m_bestHubSensorIndex = -1;
 
     private boolean  m_allianceSet    = false;
     private Pose2d   m_lastVisionPose = null;
@@ -250,6 +258,7 @@ public class VisionSubsystem extends SubsystemBase {
             m_sensors.add(new ReadAprilTag(name, robotToCam));
             if (VisionHardware.CAMERA_TURRET.equals(name)) {
                 m_turretSensorIndex = i;
+                m_sensors.get(i).setUse3D(false); // turret camera: 2D only (yaw/pitch for distance)
             }
         }
 
@@ -279,10 +288,10 @@ public class VisionSubsystem extends SubsystemBase {
         Set<Integer> seenTagIds      = new HashSet<>();
         int rejStale = 0, rejOutOfBounds = 0, rejTeleport = 0;
 
-        // Reset per-loop target state
-        m_bestTarget    = null;
-        m_bestHubTarget = null;
-        m_hubDistMeters = 0.0;
+        // Reset per-loop target state (m_hubDistMeters intentionally NOT reset — holds last valid reading)
+        m_bestTarget         = null;
+        m_bestHubTarget      = null;
+        m_bestHubSensorIndex = -1;
 
         Pose2d robotPose = m_drivetrain.getState().Pose;
         double now       = RobotController.getFPGATime() * 1e-6; // µs → s
@@ -303,124 +312,92 @@ public class VisionSubsystem extends SubsystemBase {
                 new Rotation3d(0, pitchRad, theta)));
         }
 
-        for (ReadAprilTag sensor : m_sensors) {
+        for (int sensorIdx = 0; sensorIdx < m_sensors.size(); sensorIdx++) {
+            ReadAprilTag sensor = m_sensors.get(sensorIdx);
 
             // Step 1 — fetch all new frames from this camera (clears the camera buffer)
             sensor.update();
 
-            // Step 2 — process every new estimate; each carries its own timestamp
-            for (EstimatedRobotPose estimate : sensor.getNewEstimates()) {
+            // Step 2 — process 3D pose estimates (skipped for turret camera — 2D only)
+            boolean isTurretCamera = (sensorIdx == m_turretSensorIndex) && m_turretSensorIndex >= 0;
+            if (!isTurretCamera) {
+                for (EstimatedRobotPose estimate : sensor.getNewEstimates()) {
 
-                Pose2d estPose   = estimate.estimatedPose.toPose2d();
-                double timestamp = estimate.timestampSeconds;
-                
-                // Determine if this is the turret camera
-                boolean isTurretCamera = (m_turretSensorIndex >= 0 && sensor == m_sensors.get(m_turretSensorIndex));
+                    Pose2d estPose   = estimate.estimatedPose.toPose2d();
+                    double timestamp = estimate.timestampSeconds;
 
-                // ── Sanity Filter ─────────────────────────────────────────────
+                    // ── Sanity Filter ─────────────────────────────────────────────
 
-                // (a) Staleness: drop frames that arrived too late to be useful
-                if ((now - timestamp) > VISION_STALENESS_S) { rejStale++; continue; }
+                    // (a) Staleness: drop frames that arrived too late to be useful
+                    if ((now - timestamp) > VISION_STALENESS_S) { rejStale++; continue; }
 
-                // (b) Field boundaries: robot cannot be outside the field
-                // Turret camera only used for rotation, so skip field bounds check for it
-                if (!isTurretCamera && !isWithinField(estPose)) { rejOutOfBounds++; continue; }
+                    // (b) Field boundaries: robot cannot be outside the field
+                    if (!isWithinField(estPose)) { rejOutOfBounds++; continue; }
 
-                // ── Tag metrics from this specific estimate's targets ─────────
-                // Computed from estimate.targetsUsed so each frame in the batch
-                // gets its own correct distance/ambiguity — not stale latest-result values.
-                int    tagCount  = estimate.targetsUsed.size();
-                double dist      = 0.0;
-                for (var t : estimate.targetsUsed) {
-                    dist += t.getBestCameraToTarget().getTranslation().getNorm();
-                }
-                if (tagCount > 0) dist /= tagCount;
-                double ambiguity = estimate.targetsUsed.stream()
-                    .mapToDouble(t -> t.getPoseAmbiguity())
-                    .min().orElse(1.0);
+                    // ── Tag metrics from this specific estimate's targets ─────────
+                    int    tagCount  = estimate.targetsUsed.size();
+                    double dist      = 0.0;
+                    for (var t : estimate.targetsUsed) {
+                        dist += t.getBestCameraToTarget().getTranslation().getNorm();
+                    }
+                    if (tagCount > 0) dist /= tagCount;
+                    double ambiguity = estimate.targetsUsed.stream()
+                        .mapToDouble(t -> t.getPoseAmbiguity())
+                        .min().orElse(1.0);
 
-                // (c) Large pose jump handling — only for non-turret cameras
-                // Turret camera is rotation-only, so skip large jump detection
-                if (!isTurretCamera) {
+                    // (c) Large pose jump check
                     double jumpDist = estPose.getTranslation()
                         .getDistance(robotPose.getTranslation());
                     if (jumpDist > MAX_POSE_JUMP_M) {
-                        // Check heading consistency: large jump + large heading change = reject
                         double headingDelta = Math.abs(estPose.getRotation().minus(robotPose.getRotation()).getRadians());
                         if (headingDelta > Math.PI / 2.0) {
-                            // >90° heading flip = likely PnP ambiguity, reject regardless of ambiguity
                             rejTeleport++;
                         } else if (ambiguity < 0.3 && m_visionEnabled) {
                             m_drivetrain.resetPose(estPose);
-                            robotPose = estPose; // update local ref so rest of loop uses new pose
+                            robotPose = estPose;
                             Logger.recordOutput("Vision/PoseReset", true);
                         } else {
                             rejTeleport++;
                         }
-                        continue; // don't also add as vision measurement after reset
+                        continue;
                     }
                     Logger.recordOutput("Vision/PoseReset", false);
-                }
 
-                // Base XY std-dev scales quadratically with range
-                double xyStdDev = XY_BASE_STDDEV + dist * dist * XY_DIST_COEFF;
+                    // Base XY std-dev scales quadratically with range
+                    double xyStdDev = XY_BASE_STDDEV + dist * dist * XY_DIST_COEFF;
+                    if (tagCount >= 2) xyStdDev *= MULTI_TAG_FACTOR;
+                    xyStdDev *= (1.0 + ambiguity * (AMBIGUITY_SCALE - 1.0));
 
-                // Multi-tag bonus: geometric constraint greatly reduces error
-                if (tagCount >= 2) xyStdDev *= MULTI_TAG_FACTOR;
+                    if (!m_visionEnabled) continue;
 
-                // Ambiguity penalty: linearly scale up std-dev for higher ambiguity
-                xyStdDev *= (1.0 + ambiguity * (AMBIGUITY_SCALE - 1.0));
+                    m_drivetrain.addVisionMeasurement(
+                        estPose,
+                        timestamp,
+                        VecBuilder.fill(xyStdDev, xyStdDev, ROT_STDDEV_RAD));
 
-                // Rotation: gyro owns heading. Vision only corrects XY.
-                // Turret camera is rotation-only, so set XY std-dev to infinity (ignore XY)
-                double rotStdDev = ROT_STDDEV_RAD;
-                if (isTurretCamera) {
-                    xyStdDev = 9999.0; // Ignore X,Y from turret camera
-                }
-
-                // ── Feed to Kalman filter at the historical timestamp ──────────
-                // Skipped when vision is paused (e.g. DriveToPose is active) so
-                // mid-motion Kalman corrections never jitter the drivetrain output.
-                if (!m_visionEnabled) continue;
-
-                // SwerveDrivePoseEstimator buffers past odometry states and
-                // retroactively applies the vision correction at the correct time.
-                m_drivetrain.addVisionMeasurement(
-                    estPose,
-                    timestamp,
-                    VecBuilder.fill(xyStdDev, xyStdDev, rotStdDev));
-
-                // Track for ghost pose display, consensus calc, and AdvantageScope
-                // Don't add X,Y to consensus if turret camera
-                if (!isTurretCamera) {
                     acceptedPoses.add(estPose);
                     acceptedStdDevs.add(xyStdDev);
-                }
-                if (m_lastVisionPose == null || timestamp > m_lastVisionTimeS) {
-                    m_lastVisionPose  = estPose;
-                    m_lastVisionTimeS = now;
-                }
 
-                m_fieldCameras.getObject("Ghost-" + sensor.getName()).setPose(estPose);
+                    if (m_lastVisionPose == null || timestamp > m_lastVisionTimeS) {
+                        m_lastVisionPose  = estPose;
+                        m_lastVisionTimeS = now;
+                    }
 
-                // Log per-camera trust metrics for tuning
-                String logPrefix = "Vision/" + sensor.getName() + "/";
-                Logger.recordOutput(logPrefix + "XY_StdDev",  xyStdDev);
-                Logger.recordOutput(logPrefix + "TagCount",   (double) tagCount);
-                Logger.recordOutput(logPrefix + "Distance_m", dist);
-                Logger.recordOutput(logPrefix + "Ambiguity",  ambiguity);
-                if (!isTurretCamera) {
-                    double jumpDist = estPose.getTranslation()
-                        .getDistance(robotPose.getTranslation());
+                    m_fieldCameras.getObject("Ghost-" + sensor.getName()).setPose(estPose);
+
+                    String logPrefix = "Vision/" + sensor.getName() + "/";
+                    Logger.recordOutput(logPrefix + "XY_StdDev",  xyStdDev);
+                    Logger.recordOutput(logPrefix + "TagCount",   (double) tagCount);
+                    Logger.recordOutput(logPrefix + "Distance_m", dist);
+                    Logger.recordOutput(logPrefix + "Ambiguity",  ambiguity);
                     Logger.recordOutput(logPrefix + "JumpDist_m", jumpDist);
                 }
-            }
 
-            // Per-camera 3D estimated poses — for AdvantageScope 3D field view.
-            // Shows exactly what each camera thinks the robot's pose is.
-            Logger.recordOutput(
-                "Vision/" + sensor.getName() + "/EstimatedPoses3d",
-                sensor.getNewEstimatedPoses3d());
+                // Per-camera 3D estimated poses — for AdvantageScope 3D field view.
+                Logger.recordOutput(
+                    "Vision/" + sensor.getName() + "/EstimatedPoses3d",
+                    sensor.getNewEstimatedPoses3d());
+            }
 
             // Camera-to-tag transforms — visualize tag detections in 3D.
             Logger.recordOutput(
@@ -435,10 +412,11 @@ public class VisionSubsystem extends SubsystemBase {
                     if (m_bestTarget == null || target.getArea() > m_bestTarget.getArea()) {
                         m_bestTarget = target;
                     }
-                    if (isHubTag(target.getFiducialId())) {
+                    if (isHubTag(target.getFiducialId()) && sensorIdx == m_turretSensorIndex) {
                         if (m_bestHubTarget == null
                                 || target.getArea() > m_bestHubTarget.getArea()) {
-                            m_bestHubTarget = target;
+                            m_bestHubTarget      = target;
+                            m_bestHubSensorIndex = sensorIdx;
                             m_lastHubResultTimestamp = sensor.getLatestResultTimestamp();
                         }
                     }
@@ -458,12 +436,19 @@ public class VisionSubsystem extends SubsystemBase {
         }
 
         // ── Hub distance ──────────────────────────────────────────────────────
+        // Hub distance is only computed from the turret camera (see target detection above).
+        // Outlier filter: reject readings outside valid range or that jump too far from
+        // the last accepted value — prevents bad tag detections from spiking RPM commands.
         if (m_bestHubTarget != null) {
-            m_hubDistMeters = PhotonUtils.calculateDistanceToTargetMeters(
-                VisionConstants.CAMERA_HEIGHT_METERS,
-                VisionConstants.HUB_TAG_HEIGHT_METERS,
-                VisionConstants.CAMERA_PITCH_RADIANS,
-                Units.degreesToRadians(m_bestHubTarget.getPitch()));
+            double newDist = (VisionConstants.HUB_TAG_HEIGHT_METERS - VisionConstants.TURRET_CAM_HEIGHT_METERS)
+                / Math.tan(VisionConstants.TURRET_CAM_PITCH_RADIANS
+                    + Units.degreesToRadians(m_bestHubTarget.getPitch()));
+            boolean inRange = newDist >= HUB_DIST_MIN_M && newDist <= HUB_DIST_MAX_M;
+            boolean smallJump = m_hubDistMeters == 0.0
+                || Math.abs(newDist - m_hubDistMeters) <= HUB_DIST_MAX_JUMP_M;
+            if (inRange && smallJump) {
+                m_hubDistMeters = newDist;
+            }
         }
 
         // ── Multi-source weighted consensus pose ──────────────────────────────
@@ -706,12 +691,27 @@ public class VisionSubsystem extends SubsystemBase {
         if (m_bestTarget != null) {
             SmartDashboard.putNumber("Vision/Target ID",        m_bestTarget.getFiducialId());
             SmartDashboard.putNumber("Vision/Target Yaw (deg)", m_bestTarget.getYaw());
-            SmartDashboard.putNumber("Vision/Distance (in)",    getDistanceToTarget());
+            SmartDashboard.putNumber("Vision/Distance (in)",    Units.metersToInches(m_hubDistMeters));
         }
         if (m_bestHubTarget != null) {
             SmartDashboard.putNumber("Vision/Hub Tag ID",        m_bestHubTarget.getFiducialId());
             SmartDashboard.putNumber("Vision/Hub Tag Yaw (deg)", m_bestHubTarget.getYaw());
             SmartDashboard.putNumber("Vision/Hub Distance (m)",  m_hubDistMeters);
+            SmartDashboard.putNumber("Vision/Hub Distance (in)", Units.metersToInches(m_hubDistMeters));
+        }
+
+        // ── Turret camera debug ───────────────────────────────────────────────
+        if (m_turretSensorIndex >= 0) {
+            var turretResult = m_sensors.get(m_turretSensorIndex).getLatestResult();
+            boolean turretHasTarget = turretResult != null && turretResult.hasTargets();
+            SmartDashboard.putBoolean("Vision/Turret/Has Target", turretHasTarget);
+            if (turretHasTarget) {
+                var best = turretResult.getBestTarget();
+                SmartDashboard.putNumber("Vision/Turret/Best Tag ID",   best.getFiducialId());
+                SmartDashboard.putNumber("Vision/Turret/Pitch (deg)",   best.getPitch());
+                SmartDashboard.putNumber("Vision/Turret/Yaw (deg)",     best.getYaw());
+                SmartDashboard.putBoolean("Vision/Turret/Is Hub Tag",   isHubTag(best.getFiducialId()));
+            }
         }
     }
 }
