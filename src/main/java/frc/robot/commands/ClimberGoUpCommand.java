@@ -15,7 +15,7 @@ public class ClimberGoUpCommand extends Command {
 
     private final ClimberSubsystem m_climber;
     private static final double TARGET_POSITION = ClimberConstants.UP_POSITION_ROTATIONS;
-    private static final double UP_POWER = 0.5;
+    private static final double UP_POWER = 0.8;
     private static final double TOLERANCE = ClimberConstants.POSITION_TOLERANCE_ROTATIONS;
 
     public ClimberGoUpCommand(ClimberSubsystem climber) {

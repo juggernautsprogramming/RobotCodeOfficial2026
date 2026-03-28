@@ -112,8 +112,8 @@ public final class Constants {
 
     public static final class ControlDeadbands {
         // Driver inputs (joystick)
-        public static final double DRIVER_ROTATION_DEADBAND = 0.12;  // Slightly tighter for precision
-        public static final double DRIVE_REQUEST_DEADBAND   = 0.10;  // 10% of max speed
+        public static final double DRIVER_ROTATION_DEADBAND = 0.18;  // Slightly tighter for precision
+        public static final double DRIVE_REQUEST_DEADBAND   = 0.13;  // 10% of max speed
 
         // Operator inputs
         public static final double TURRET_STICK_DEADBAND    = 0.10;
@@ -249,11 +249,11 @@ public final class Constants {
 
         // ── Camera geometry ───────────────────────────────────────────────────
         public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
-        public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(12.9);
+        
         public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(20);
         /** Height of the hub AprilTag center above the floor (meters).
          *  Matches ShooterConstants.HUB_TARGET_HEIGHT_METERS — update both if the tag moves. */
-        public static final double HUB_TAG_HEIGHT_METERS = 2.64;
+        public static final double HUB_TAG_HEIGHT_METERS = 1.1176;
 
         /** AprilTag IDs used for robot-rotation alignment (AlignToTag + SnapAimAndShootCommand). */
         public static final int[] ALIGN_TAG_IDS = {26, 10, 21, 5, 18, 2, 20, 4};
@@ -348,7 +348,7 @@ public final class Constants {
          * (~0.20 m) + tape_to_physics_correction (0.347 m) ≈ 1.05 m.
          * Tune this value if shots still over/undershoot after distance is correct.
          */
-        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 1.07;
+        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 1.06;
 
         // ── Fixed hood angle ──────────────────────────────────────────────────
         /**
@@ -465,7 +465,7 @@ public final class Constants {
             // Physics distances = tape distance − DIST_CORRECTION (0.347 m)
             // RPM anchors match the confirmed entries in RPM_DISTANCE_TABLE (★ confirmed on field).
             double[] x = { 0.953,1.153, 2.153, 3.653, 5.153 };
-            double[] y = { 2000,2100.0, 2400.0, 2880.0, 3500.0 };
+            double[] y = { 1850,1900.0, 2340.0, 2880.0, 3460.0 };
             int n = x.length;
             double[] h     = new double[n - 1];
             double[] delta = new double[n - 1];
@@ -648,14 +648,14 @@ public final class Constants {
         public static final double ACCELERATION    = 200.0; // rot/s²
 
         // ── Slot 0 gains ──────────────────────────────────────────────────────
-        public static final double kP = 2.0;
+        public static final double kP = 6.0;
         public static final double kI = 0.0;
         public static final double kD = 0.1;
         /** Gravity feedforward (Volts) — opposes gravity when arm is extended. */
-        public static final double kG = 0.2;
+        public static final double kG = 0.8;
 
         // ── Stator current limit ──────────────────────────────────────────────
-        public static final double STATOR_LIMIT_AMPS = 40.0;
+        public static final double STATOR_LIMIT_AMPS = 45.0;
 
         // ── Climber Positions (in motor rotations) ─────────────
         
@@ -674,7 +674,8 @@ public final class Constants {
 
     public static final class FeederConstants {
         /** Feeder motor CAN ID. */
-        public static final int FEEDER_MOTOR_ID = 25;
+        public static final int    FEEDER_MOTOR_ID = 25;
+        public static final String FEEDER_CAN_BUS  = "rio";
 
         /** Normal feeder duty cycle (forward, 0–1 fraction of battery voltage). */
         public static final double FEEDER_DUTY_NORMAL = 0.60;  // Reduced from 0.65 for safety margin
@@ -732,18 +733,18 @@ public final class Constants {
         /** Target position (rotations) when the arm is fully deployed. */
         public static final double DEPLOYED_ROTATIONS = 11.33;
         /** Target position (rotations) when the arm is fully stowed. */
-        public static final double STOWED_ROTATIONS   = 4.0;
+        public static final double STOWED_ROTATIONS   = 0.0;
         /** Bar stops spinning when arm is within this many rotations of stow. */
         public static final double STOW_TOLERANCE     = 0.5;
 
         /** Duty-cycle power for the uptake roller when ejecting (0–1). */
-        public static final double ROLLER_POWER    = 0.65;
+        public static final double ROLLER_POWER    = 0.9;
         /** Duty-cycle power for the intake bar/rod motors when ejecting (0–1). */
         public static final double BAR_POWER       = 0.9;
         /** Duty-cycle power for the uptake roller when intaking (0–1). */
         public static final double ROLLER_POWER_IN = 0.05;
         /** Duty-cycle power for the intake bar/rod motors when intaking (0–1). */
-        public static final double BAR_POWER_IN    = 0.8;
+        public static final double BAR_POWER_IN    = 0.9;
 
         private IntakeConstants() {}
     }

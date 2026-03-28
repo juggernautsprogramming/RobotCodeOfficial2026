@@ -108,12 +108,13 @@ public class RobotContainer {
     // ── Speed constants ───────────────────────────────────────────────────────
     private final double kMaxSpeed       = 4.5;  // m/s — normal max translation speed
     private final double kTurboSpeed     = 6.0;  // m/s — turbo max speed (right trigger)
-    private final double kMaxAngularRate = RotationsPerSecond.of(1.5).in(RadiansPerSecond); // 1.5 rot/s — faster peak turn
+    // Was 1.5 rot/s — drop to 0.9–1.1 for less snap
+private final double kMaxAngularRate = RotationsPerSecond.of(1.0).in(RadiansPerSecond); // 1.5 rot/s — faster peak turn
 
     // Left trigger turn sensitivity:
     //   Released (0.0) → scale = 1.0 (full turn rate)
     //   Fully pressed (1.0) → scale = kMinTurnScale (20%)
-    private final double kMinTurnScale = 0.2;
+    private final double kMinTurnScale = 0.15;
     private final double kNudgeSpeed   = 0.15 * kMaxSpeed;
 
     // ── Joystick deadbands ────────────────────────────────────────────────────
@@ -122,9 +123,9 @@ public class RobotContainer {
     // ── Slew rate limiters (acceleration limiting) ────────────────────────────
     // Units: m/s² for translation, rad/s² for rotation.
     // Lower value = smoother but less responsive. Tune on carpet.
-    private final SlewRateLimiter m_xLimiter   = new SlewRateLimiter(3.5);
-    private final SlewRateLimiter m_yLimiter   = new SlewRateLimiter(3.5);
-    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(12.0); // higher = snappier stop, less coast-through
+private final SlewRateLimiter m_xLimiter = new SlewRateLimiter(2.5); // was 3.5
+private final SlewRateLimiter m_yLimiter = new SlewRateLimiter(2.5); // was 3.5
+    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(6.0); // higher = snappier stop, less coast-through
 
     // ── RPM toggle state ──────────────────────────────────────────────────────
     // Tracks whether RPM is currently spinning (for toggle behavior)
@@ -150,8 +151,9 @@ public class RobotContainer {
     private static final double kSteerSupplyLimit = 20.0;
 
     // ── Swerve requests ───────────────────────────────────────────────────────
+    // In RobotContainer, the m_drive request
     private final SwerveRequest.FieldCentric m_drive = new SwerveRequest.FieldCentric()
-        .withDeadband(kMaxSpeed * 0.1)
+        .withDeadband(kMaxSpeed * 0.13)  // was 0.1 — scales with speed automatically
         .withRotationalDeadband(kMaxAngularRate * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
@@ -265,7 +267,7 @@ public class RobotContainer {
         // ── Feeder ────────────────────────────────────────────────────────────
         // "StartFeeder" — run feeder (gate check done by operator; in auto pair with SpinUp_*)
         NamedCommands.registerCommand("StartFeeder",
-            Commands.runOnce(() -> feederSubsystem.setPower(5.0), feederSubsystem));
+            Commands.runOnce(() -> feederSubsystem.setPower(FeederConstants.FEEDER_DUTY_NORMAL), feederSubsystem));
         // "StopFeeder" — stop feeder roller
         NamedCommands.registerCommand("StopFeeder",
             Commands.runOnce(feederSubsystem::stop, feederSubsystem));
@@ -760,7 +762,14 @@ public class RobotContainer {
                 m_turretModeChooser::getSelected
             )
         );
-
+        m_playerStick.back().and(m_playerStick.start()).onTrue(
+            Commands.sequence(
+                Commands.runOnce(climberSubsystem::zeroAndDisableSoftLimits, climberSubsystem),
+                Commands.waitSeconds(0.5)
+            )
+        ).onFalse(
+            Commands.runOnce(climberSubsystem::restoreSoftLimits, climberSubsystem)
+        );
         // Default turret command: player joystick control.
         // Right-stick toggle overrides to Odometry, AprilTag, or Player mode.
         turretSubsystem.setDefaultCommand(

@@ -25,7 +25,7 @@ public class AutoClimbCommand extends Command {
 
     @Override
     public void initialize() {
-        m_climber.setPowerLevel(-0.4);
+        m_climber.setPowerLevel(-0.75);
         SmartDashboard.putString("AutoClimb/Status", "CLIMBING");
     }
 

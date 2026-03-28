@@ -2,6 +2,7 @@ package frc.robot.subsystems.Climber;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
@@ -11,13 +12,15 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.ClimberConstants;
 
 /**
- * ClimberSubsystem — single motor climber with pure duty cycle control.
+ * ClimberSubsystem — single motor climber with voltage-controlled duty cycle.
  *
- * Uses simple duty cycle commands (hold down triggers to move manually).
+ * Uses VoltageOut control requests for consistent torque regardless of battery
+ * voltage. Hold triggers to move manually; brake mode holds position on release.
  */
 public class ClimberSubsystem extends SubsystemBase {
 
-    private final TalonFX motor;
+    private final TalonFX   motor;
+    private final VoltageOut m_voltageRequest = new VoltageOut(0);
 
     public ClimberSubsystem() {
         CANBus chassisCAN = new CANBus(ClimberConstants.CAN_BUS);
@@ -40,20 +43,61 @@ public class ClimberSubsystem extends SubsystemBase {
         motor.setPosition(0);
     }
 
+    // ── Soft limit management (for match-start zeroing) ───────────────────────
+
     /**
-     * Set motor power directly using duty cycle.
-     * Range: -1.0 (down) to 1.0 (up)
-     * Hardware soft limits enforce UP_POSITION_ROTATIONS and DOWN_POSITION_ROTATIONS.
+     * Disables soft limits and zeros the encoder to the current physical position.
+     * Call ONLY when the climber is physically at its lowest resting position.
      */
-    public void setPowerLevel(double power) {
-        motor.set(power);
+    public void zeroAndDisableSoftLimits() {
+        var cfg = new TalonFXConfiguration();
+        motor.getConfigurator().refresh(cfg);
+
+        cfg.SoftwareLimitSwitch.ForwardSoftLimitEnable = false;
+        cfg.SoftwareLimitSwitch.ReverseSoftLimitEnable = false;
+
+        motor.getConfigurator().apply(cfg);
+        motor.setPosition(0.0);
+
+        SmartDashboard.putString("Climber/LimitStatus", "DISABLED — ZEROED");
     }
 
     /**
-     * Stop the motor.
+     * Re-enables soft limits at their configured constants.
+     * Call after zeroing is confirmed (i.e. on button release).
+     */
+    public void restoreSoftLimits() {
+        var cfg = new TalonFXConfiguration();
+        motor.getConfigurator().refresh(cfg);
+
+        cfg.SoftwareLimitSwitch.ForwardSoftLimitEnable    = true;
+        cfg.SoftwareLimitSwitch.ForwardSoftLimitThreshold = ClimberConstants.UP_POSITION_ROTATIONS;
+        cfg.SoftwareLimitSwitch.ReverseSoftLimitEnable    = true;
+        cfg.SoftwareLimitSwitch.ReverseSoftLimitThreshold = ClimberConstants.DOWN_POSITION_ROTATIONS;
+
+        motor.getConfigurator().apply(cfg);
+        SmartDashboard.putString("Climber/LimitStatus", "RESTORED");
+    }
+
+    // ── Motion control ────────────────────────────────────────────────────────
+
+    /**
+     * Set motor power using voltage control.
+     * Range: -1.0 (down) to 1.0 (up) — scaled to ±12V internally.
+     * VoltageOut compensates for battery sag, giving consistent climb force
+     * regardless of battery state. Soft limits still enforce travel bounds.
+     *
+     * @param power duty-cycle fraction, -1.0 to 1.0
+     */
+    public void setPowerLevel(double power) {
+        motor.setControl(m_voltageRequest.withOutput(power * 12.0));
+    }
+
+    /**
+     * Stop the motor. Brake mode holds position passively.
      */
     public void stop() {
-        motor.set(0);
+        motor.setControl(m_voltageRequest.withOutput(0.0));
     }
 
     /**
@@ -63,11 +107,15 @@ public class ClimberSubsystem extends SubsystemBase {
         return motor.getPosition().getValueAsDouble();
     }
 
+    // ── Telemetry ─────────────────────────────────────────────────────────────
+
     @Override
     public void periodic() {
         double posRot = getCurrentPosition();
-        SmartDashboard.putNumber("Climber/Position_rot", posRot);
-        SmartDashboard.putNumber("Climber/Position_deg", posRot * 360.0);
-        SmartDashboard.putNumber("Climber/Velocity_rps", motor.getVelocity().getValueAsDouble());
+        SmartDashboard.putNumber("Climber/Position_rot",  posRot);
+        SmartDashboard.putNumber("Climber/Position_deg",  posRot * 360.0);
+        SmartDashboard.putNumber("Climber/Velocity_rps",  motor.getVelocity().getValueAsDouble());
+        SmartDashboard.putNumber("Climber/Current_amps",  motor.getStatorCurrent().getValueAsDouble());
+        SmartDashboard.putNumber("Climber/Voltage_V",     motor.getMotorVoltage().getValueAsDouble());
     }
 }
