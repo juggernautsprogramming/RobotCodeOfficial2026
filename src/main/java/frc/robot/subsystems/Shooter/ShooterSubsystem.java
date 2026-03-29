@@ -285,7 +285,7 @@ public class ShooterSubsystem extends SubsystemBase {
             1.225,                                              // airDensity kg/m³
             ShooterConstants.SHOOTER_EXIT_HEIGHT_METERS,        // 0.52 m
             ShooterConstants.WHEEL_DIAMETER_INCHES * 0.0254,    // 0.1016 m
-            ShooterConstants.HUB_TARGET_HEIGHT_METERS,          // 2.64 m
+            ShooterConstants.HUB_TARGET_HEIGHT_METERS,          // 1.041 m (41 in, 2026 REBUILT)
             ShooterConstants.EFFICIENCY,                        // 0.424 slip factor
             ShooterConstants.FIXED_SHOT_ANGLE_DEG,              // 61.5°
             0.001,   // sim timestep (s)

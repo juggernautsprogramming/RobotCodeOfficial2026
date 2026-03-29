@@ -57,14 +57,19 @@ public class TurretHubTrackCommand extends Command {
         boolean hasTag = hubTarget != null && !Double.isNaN(hubTarget.getYaw());
 
         if (hasTag) {
-            // ── Camera path: drive directly to camera-relative yaw ───────────
+            // ── Camera path: aim at hub CENTER, not the raw tag face yaw ─────
+            // getHubCenterYawDeg() uses robot pose + alliance hub center so the
+            // turret targets the scoring opening rather than the AprilTag surface.
+            double hubCenterYaw = m_vision.getHubCenterYawDeg();
             double turretDeg = MathUtil.inputModulus(
-                hubTarget.getYaw() + TurretConstants.TURRET_AIM_TRIM_DEG, -180.0, 180.0);
-            m_turret.setAngleDeg(turretDeg);
+                hubCenterYaw + TurretConstants.TURRET_AIM_TRIM_DEG, -180.0, 180.0);
+            double omega = m_drivetrain.getState().Speeds.omegaRadiansPerSecond;
+            m_turret.setAngleDegWithFF(turretDeg, omega);
 
-            SmartDashboard.putString("TurretTrack/Source",     "Camera");
-            SmartDashboard.putNumber("TurretTrack/CamYaw_deg", hubTarget.getYaw());
-            SmartDashboard.putNumber("TurretTrack/Target_deg", turretDeg);
+            SmartDashboard.putString("TurretTrack/Source",        "Camera");
+            SmartDashboard.putNumber("TurretTrack/CamYaw_deg",    hubTarget.getYaw());
+            SmartDashboard.putNumber("TurretTrack/HubCenterYaw",  hubCenterYaw);
+            SmartDashboard.putNumber("TurretTrack/Target_deg",    turretDeg);
         } else {
             // ── Odometry fallback: geometry + omega feedforward ───────────────
             double turretDeg = computeOdometryTurretDeg();

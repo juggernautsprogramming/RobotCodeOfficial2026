@@ -12,7 +12,6 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.util.PathPlannerLogging;
 
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -120,12 +119,6 @@ private final double kMaxAngularRate = RotationsPerSecond.of(1.0).in(RadiansPerS
     // ── Joystick deadbands ────────────────────────────────────────────────────
     // (These were replaced with inline deaband values in drive requests)
 
-    // ── Slew rate limiters (acceleration limiting) ────────────────────────────
-    // Units: m/s² for translation, rad/s² for rotation.
-    // Lower value = smoother but less responsive. Tune on carpet.
-private final SlewRateLimiter m_xLimiter = new SlewRateLimiter(2.5); // was 3.5
-private final SlewRateLimiter m_yLimiter = new SlewRateLimiter(2.5); // was 3.5
-    private final SlewRateLimiter m_rotLimiter = new SlewRateLimiter(6.0); // higher = snappier stop, less coast-through
 
     // ── RPM toggle state ──────────────────────────────────────────────────────
     // Tracks whether RPM is currently spinning (for toggle behavior)
@@ -419,18 +412,13 @@ private final SlewRateLimiter m_yLimiter = new SlewRateLimiter(2.5); // was 3.5
                 double rawRot = -MathUtil.applyDeadband(m_driverStick.getRightX(), ControlDeadbands.DRIVER_ROTATION_DEADBAND)
                     * kMaxAngularRate * turnScale;
 
-                // Apply slew rate limiting for smoother acceleration
-                double limitedX = m_xLimiter.calculate(rawX);
-                double limitedY = m_yLimiter.calculate(rawY);
-                double limitedRot = m_rotLimiter.calculate(rawRot);
-
                 Logger.recordOutput("Driver/TurnScale",        turnScale);
                 Logger.recordOutput("Driver/TranslationSpeed", translationSpeed);
 
                 return m_drive
-                    .withVelocityX(limitedX)
-                    .withVelocityY(limitedY)
-                    .withRotationalRate(limitedRot);
+                    .withVelocityX(rawX)
+                    .withVelocityY(rawY)
+                    .withRotationalRate(rawRot);
             })
         );
 

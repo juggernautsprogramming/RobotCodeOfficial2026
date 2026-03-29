@@ -249,11 +249,10 @@ public final class Constants {
 
         // ── Camera geometry ───────────────────────────────────────────────────
         public static final double CAMERA_HEIGHT_METERS = Units.inchesToMeters(20);
-        
+        public static final double TARGET_HEIGHT_METERS  = Units.inchesToMeters(44.25); // hub AprilTag center, 2026 REBUILT
         public static final double CAMERA_PITCH_RADIANS  = Units.degreesToRadians(20);
-        /** Height of the hub AprilTag center above the floor (meters).
-         *  Matches ShooterConstants.HUB_TARGET_HEIGHT_METERS — update both if the tag moves. */
-        public static final double HUB_TAG_HEIGHT_METERS = 1.1176;
+        /** Height of the hub AprilTag center above the floor (meters). 2026 REBUILT: 44.25 in. */
+        public static final double HUB_TAG_HEIGHT_METERS = Units.inchesToMeters(44.25); // 1.1240 m
 
         /** AprilTag IDs used for robot-rotation alignment (AlignToTag + SnapAimAndShootCommand). */
         public static final int[] ALIGN_TAG_IDS = {26, 10, 21, 5, 18, 2, 20, 4};
@@ -320,16 +319,26 @@ public final class Constants {
 
         // ── Field / Hub geometry ──────────────────────────────────────────────
         /**
-         * Hub center on the full 2026 FRC field (metres, blue-alliance origin).
-         * TODO: verify against the official field layout or measure on-field.
+         * Hub centers on the 2026 REBUILT field (metres, blue-alliance origin).
+         * Red hub is the field mirror of the blue hub (X mirrored across 16.54 / 2 = 8.27 m).
+         * TODO: verify X/Y against the official 2026 field-dimension drawings.
          */
-        public static final Translation2d HUB_CENTER =
-                new Translation2d(4.5969, 4.026);
+        public static final Translation2d HUB_CENTER_BLUE = new Translation2d(4.5969, 4.026);
+        public static final Translation2d HUB_CENTER_RED  = new Translation2d(16.54 - 4.5969, 4.026); // ≈ (11.94, 4.026)
+        /** Backwards-compat alias — points to the blue hub center. */
+        public static final Translation2d HUB_CENTER = HUB_CENTER_BLUE;
 
-        /** Height of the hub opening above the floor (meters). */
-        public static final double HUB_TARGET_HEIGHT_METERS = 2.64;
+        /** Height of the hub opening above the floor (meters). 2026 REBUILT: 41 in. */
+        public static final double HUB_TARGET_HEIGHT_METERS = Units.inchesToMeters(41); // 1.0414 m
 
-        /** AprilTag IDs attached to the hub. */
+        /**
+         * AprilTag IDs on each alliance's hub.
+         * TODO: verify split against the official 2026 AprilTag layout — lower IDs are
+         *       typically red-side, higher IDs blue-side but confirm from the field manual.
+         */
+        public static final int[] HUB_APRIL_TAG_IDS_RED  = {2, 4, 5, 10};
+        public static final int[] HUB_APRIL_TAG_IDS_BLUE = {18, 20, 21, 26};
+        /** All hub tag IDs combined (both alliances). */
         public static final int[] HUB_APRIL_TAG_IDS = {26,21,18,20,10,5,2,4};
 
         // ── Shooter mechanism geometry ────────────────────────────────────────
@@ -348,7 +357,7 @@ public final class Constants {
          * (~0.20 m) + tape_to_physics_correction (0.347 m) ≈ 1.05 m.
          * Tune this value if shots still over/undershoot after distance is correct.
          */
-        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 1.06;
+        public static final double ODOMETRY_TO_RPM_TABLE_OFFSET_M = 1.09;
 
         // ── Fixed hood angle ──────────────────────────────────────────────────
         /**
@@ -464,8 +473,8 @@ public final class Constants {
         static {
             // Physics distances = tape distance − DIST_CORRECTION (0.347 m)
             // RPM anchors match the confirmed entries in RPM_DISTANCE_TABLE (★ confirmed on field).
-            double[] x = { 0.953,1.153, 2.153, 3.653, 5.153 };
-            double[] y = { 1850,1900.0, 2340.0, 2880.0, 3460.0 };
+            double[] x = { 0.6153,0.953,1.153, 2.153, 3.653, 5.153 };
+            double[] y = { 2170,2200,2460.0, 2540.0, 2620.0, 3260.0 };
             int n = x.length;
             double[] h     = new double[n - 1];
             double[] delta = new double[n - 1];

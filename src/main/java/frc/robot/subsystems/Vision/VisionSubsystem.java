@@ -14,6 +14,7 @@ import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonUtils;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -24,6 +25,7 @@ import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -440,10 +442,21 @@ public class VisionSubsystem extends SubsystemBase {
         // Outlier filter: reject readings outside valid range or that jump too far from
         // the last accepted value — prevents bad tag detections from spiking RPM commands.
         if (m_bestHubTarget != null) {
-            double newDist = (VisionConstants.HUB_TAG_HEIGHT_METERS - VisionConstants.TURRET_CAM_HEIGHT_METERS)
-                / Math.tan(VisionConstants.TURRET_CAM_PITCH_RADIANS
-                    + Units.degreesToRadians(m_bestHubTarget.getPitch()));
-            boolean inRange = newDist >= HUB_DIST_MIN_M && newDist <= HUB_DIST_MAX_M;
+            double newDist;
+            var camToTag = m_bestHubTarget.getBestCameraToTarget();
+            if (camToTag != null && camToTag.getTranslation().getNorm() > 0.01) {
+                // 3D mode (PnP): derive horizontal floor distance from the 3D transform.
+                // More accurate than pitch-trig because it doesn't depend on cam-pitch calibration.
+                double dist3d    = camToTag.getTranslation().getNorm();
+                double heightDiff = VisionConstants.HUB_TAG_HEIGHT_METERS - VisionConstants.TURRET_CAM_HEIGHT_METERS;
+                newDist = Math.sqrt(Math.max(0.0, dist3d * dist3d - heightDiff * heightDiff));
+            } else {
+                // Fallback: 2D pitch-based trig (used when 3D solve is unavailable)
+                newDist = (VisionConstants.HUB_TAG_HEIGHT_METERS - VisionConstants.TURRET_CAM_HEIGHT_METERS)
+                    / Math.tan(VisionConstants.TURRET_CAM_PITCH_RADIANS
+                        + Units.degreesToRadians(m_bestHubTarget.getPitch()));
+            }
+            boolean inRange   = newDist >= HUB_DIST_MIN_M && newDist <= HUB_DIST_MAX_M;
             boolean smallJump = m_hubDistMeters == 0.0
                 || Math.abs(newDist - m_hubDistMeters) <= HUB_DIST_MAX_JUMP_M;
             if (inRange && smallJump) {
@@ -606,9 +619,29 @@ public class VisionSubsystem extends SubsystemBase {
      */
     public double getHubDistanceMeters() { return m_hubDistMeters; }
 
-    /** Yaw to the best hub tag (degrees, camera-relative). 0.0 when none visible. */
+    /** Yaw to the best hub tag face (degrees, camera-relative). 0.0 when none visible. */
     public double getHubTagYawDeg() {
         return m_bestHubTarget != null ? m_bestHubTarget.getYaw() : 0.0;
+    }
+
+    /**
+     * Robot-frame yaw to the hub CENTER (not the tag face), gated on hub tag visibility.
+     *
+     * <p>Uses the Kalman-fused robot pose + alliance hub center so the turret aims
+     * at the scoring opening rather than the AprilTag surface. Returns {@code NaN}
+     * when no hub tag is currently visible (caller should fall back to odometry).
+     */
+    public double getHubCenterYawDeg() {
+        if (!hasHubTarget()) return Double.NaN;
+        var pose = m_drivetrain.getState().Pose;
+        var hubCenter = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+            ? ShooterConstants.HUB_CENTER_RED
+            : ShooterConstants.HUB_CENTER_BLUE;
+        double dx = hubCenter.getX() - pose.getX();
+        double dy = hubCenter.getY() - pose.getY();
+        double fieldBearingDeg = Math.toDegrees(Math.atan2(dy, dx));
+        return MathUtil.inputModulus(
+            fieldBearingDeg - pose.getRotation().getDegrees(), -180.0, 180.0);
     }
 
     /**
@@ -622,8 +655,11 @@ public class VisionSubsystem extends SubsystemBase {
      * @return shooter-exit → hub-face distance in metres (clamped ≥ 0).
      */
     public double getPhysicsDistanceToHubMeters() {
+        var hubCenter = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+            ? ShooterConstants.HUB_CENTER_RED
+            : ShooterConstants.HUB_CENTER_BLUE;
         double odometryDist = m_drivetrain.getState().Pose.getTranslation()
-            .getDistance(ShooterConstants.HUB_CENTER);
+            .getDistance(hubCenter);
         return Math.max(0.0, odometryDist - ShooterConstants.ODOMETRY_TO_RPM_TABLE_OFFSET_M);
     }
 
@@ -690,7 +726,11 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     public static boolean isHubTag(int id) {
-        for (int hubId : ShooterConstants.HUB_APRIL_TAG_IDS) {
+        // Only match tags on our alliance's hub so the turret never locks onto the opponent's hub.
+        int[] myHubIds = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+            ? ShooterConstants.HUB_APRIL_TAG_IDS_RED
+            : ShooterConstants.HUB_APRIL_TAG_IDS_BLUE;
+        for (int hubId : myHubIds) {
             if (id == hubId) return true;
         }
         return false;

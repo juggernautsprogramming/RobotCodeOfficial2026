@@ -7,7 +7,7 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Pose2ToHub1.5Meters"
+            "pathName": "pose3toShoot"
           }
         },
         {
@@ -19,13 +19,13 @@
         {
           "type": "named",
           "data": {
-            "name": "SnapAimAndShoot"
+            "name": "IdleFlywheel"
           }
         },
         {
-          "type": "path",
+          "type": "wait",
           "data": {
-            "pathName": "Pose2ShootToClimb"
+            "waitTime": 3.0
           }
         }
       ]

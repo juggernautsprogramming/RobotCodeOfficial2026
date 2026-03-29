@@ -8,6 +8,8 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import frc.robot.Constants.ShooterConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Shooter.FireControlSolver;
@@ -52,8 +54,6 @@ public class TurretAutoAimCommand extends Command {
      * occluded; increase if odometry drift is a persistent problem.
      */
     private static final double VISION_WEIGHT = 0.6;
-
-    private static final Translation2d HUB = ShooterConstants.HUB_CENTER;
 
     private final CommandSwerveDrivetrain m_drivetrain;
     private final ShooterSubsystem        m_shooter;
@@ -101,11 +101,15 @@ public class TurretAutoAimCommand extends Command {
             rawSpeeds.vyMetersPerSecond,
             rawSpeeds.omegaRadiansPerSecond);
 
+        Translation2d hubCenter = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+            ? ShooterConstants.HUB_CENTER_RED
+            : ShooterConstants.HUB_CENTER_BLUE;
+
         FireControlSolver.ShotInputs inputs = new FireControlSolver.ShotInputs(
             robotPose,
             fieldSpeeds,
             fieldSpeeds,
-            HUB,
+            hubCenter,
             new Translation2d(0, 0), // disable behind-hub check
             1.0);                    // full vision confidence
 
@@ -127,8 +131,8 @@ public class TurretAutoAimCommand extends Command {
             angularVelFF = m_lastAngularVelFF;
         } else {
             // No valid solve yet — geometric aim at hub, no SOTM correction
-            double dx = HUB.getX() - robotPose.getX();
-            double dy = HUB.getY() - robotPose.getY();
+            double dx = hubCenter.getX() - robotPose.getX();
+            double dy = hubCenter.getY() - robotPose.getY();
             aimAngle     = new Rotation2d(dx, dy);
             angularVelFF = 0.0;
         }
@@ -146,20 +150,19 @@ public class TurretAutoAimCommand extends Command {
         double visionRobotYaw  = Double.NaN;
         boolean visionActive   = false;
 
-        if (m_vision.getBestHubTarget() != null) {
-            double rawVisionYaw = m_vision.getHubTagYawDeg();
-            if (!Double.isNaN(rawVisionYaw)) {
-                // Convert camera robot-frame yaw to a turret angle (same frame)
-                visionRobotYaw = MathUtil.inputModulus(rawVisionYaw, -180.0, 180.0);
+        double hubCenterYaw = m_vision.getHubCenterYawDeg();
+        if (!Double.isNaN(hubCenterYaw)) {
+            // Use hub CENTER yaw (not raw tag face yaw) so the blend targets the
+            // scoring opening rather than the AprilTag surface.
+            visionRobotYaw = MathUtil.inputModulus(hubCenterYaw, -180.0, 180.0);
 
-                // Blend along the shortest arc to avoid wrap-around jumps
-                double diff = MathUtil.inputModulus(
-                    visionRobotYaw - odomTurretDeg, -180.0, 180.0);
-                turretTargetDeg = MathUtil.inputModulus(
-                    odomTurretDeg + VISION_WEIGHT * diff, -180.0, 180.0);
+            // Blend along the shortest arc to avoid wrap-around jumps
+            double diff = MathUtil.inputModulus(
+                visionRobotYaw - odomTurretDeg, -180.0, 180.0);
+            turretTargetDeg = MathUtil.inputModulus(
+                odomTurretDeg + VISION_WEIGHT * diff, -180.0, 180.0);
 
-                visionActive = true;
-            }
+            visionActive = true;
         }
 
         // ── Angular velocity feedforward ─────────────────────────────────────

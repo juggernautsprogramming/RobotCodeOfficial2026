@@ -1,7 +1,6 @@
 package frc.robot.util;
 
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -32,12 +31,6 @@ public final class HubAlignController {
     private double m_filteredStrafe = 0.0;
     private double m_filteredRot    = 0.0;
 
-    private final SlewRateLimiter m_driveLimiter  =
-        new SlewRateLimiter(ShooterConstants.DRIVE_MAX_ACCEL);
-    private final SlewRateLimiter m_strafeLimiter =
-        new SlewRateLimiter(ShooterConstants.DRIVE_MAX_ACCEL);
-    private final SlewRateLimiter m_rotLimiter    =
-        new SlewRateLimiter(ShooterConstants.ROTATION_MAX_RAD_S * 2.0);
 
     private Pose2d m_targetPose = null;
 
@@ -119,10 +112,9 @@ public final class HubAlignController {
         m_filteredStrafe += alpha * (rawStrafe - m_filteredStrafe);
         m_filteredRot    += alpha * (rawRot    - m_filteredRot);
 
-        // ── Slew-rate limiter ──────────────────────────────────────────────
-        double drive  = m_driveLimiter.calculate(m_filteredDrive);
-        double strafe = m_strafeLimiter.calculate(m_filteredStrafe);
-        double rot    = m_rotLimiter.calculate(m_filteredRot);
+        double drive  = m_filteredDrive;
+        double strafe = m_filteredStrafe;
+        double rot    = m_filteredRot;
 
         // ── Deadband ───────────────────────────────────────────────────────
         drive  = deadband(drive);
@@ -148,9 +140,6 @@ public final class HubAlignController {
         m_filteredDrive  = 0.0;
         m_filteredStrafe = 0.0;
         m_filteredRot    = 0.0;
-        m_driveLimiter.reset(0.0);
-        m_strafeLimiter.reset(0.0);
-        m_rotLimiter.reset(0.0);
     }
 
     /** Last computed target pose — null before first update(). Useful for telemetry. */
